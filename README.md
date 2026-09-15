@@ -4,7 +4,8 @@ Monte Carlo Options is the quantitative foundation for a long-term derivatives-r
 The current implementation prices European calls and puts under constant-market risk-neutral
 geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
 uncertainty diagnostics, advanced variance reduction, first-class Greeks, and robust implied-
-volatility inversion.
+volatility inversion. It also normalizes real option-market snapshots for quote-quality, liquidity,
+implied-volatility, Greek, smile, and put-call-parity analysis.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -30,12 +31,15 @@ currency-safe decimal amounts.
 - Brent, bisection, Newton, and guarded AUTO implied-volatility solvers
 - European no-arbitrage validation, exact-expiry policy, and reconstruction diagnostics
 - Ordered batch inversion with per-observation failures and synthetic volatility-smile slices
+- Provider-independent underlying, option-instrument, quote, and chain-snapshot models
+- Massive (formerly Polygon.io) option-chain normalization with fully offline tests
+- Structured quote-quality, staleness, spread, IV, Greek, smile, and parity diagnostics
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes real market data, volatility-surface interpolation,
-path-dependent or American options, trees, calibration, stochastic volatility, jumps, multi-asset
-models, portfolio risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
+The current scope deliberately excludes volatility-surface interpolation, quote repair, American
+option pricing, path-dependent options, trees, calibration, stochastic volatility, jumps,
+multi-asset models, portfolio risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
 
@@ -191,6 +195,86 @@ Synthetic smile analysis computes `moneyness = K/S` and forward log-moneyness `l
 `F = S exp((r-q)T)`. It returns a single maturity slice only; interpolation, surface fitting, and
 arbitrage repair are outside Phase 4.
 
+## Real-market option data
+
+Phase 5 introduces a `MarketDataProvider` protocol. Application services consume normalized
+`UnderlyingQuote`, `OptionInstrument`, `OptionQuote`, and `OptionChainSnapshot` models and never
+depend on provider response keys. The concrete adapter uses the Massive REST API (formerly
+Polygon.io). It uses Python's standard HTTP library, so no provider SDK was added.
+
+Configure optional live access through environment variables:
+
+```text
+MARKET_DATA_PROVIDER=MASSIVE
+MARKET_DATA_API_KEY=
+MARKET_DATA_BASE_URL=https://api.massive.com
+MARKET_DATA_TIMEOUT_SECONDS=10
+```
+
+An API key is required only when a live market-data endpoint is called. It is never logged or
+returned. Normal tests use static response fixtures and `FakeMarketDataProvider`; an automatic
+socket guard fails the suite if any test attempts an external connection.
+
+### Normalization and time policy
+
+Symbols are stripped and uppercased. Provider contract types become the existing `CALL` or `PUT`.
+Provider exercise style is preserved separately as `AMERICAN`, `EUROPEAN`, `BERMUDAN`, or
+`UNKNOWN`. Provider option symbols remain opaque identifiers; analytics do not parse or depend on
+their encoding.
+
+Every timestamp must be timezone-aware and is converted to UTC. Massive nanosecond timestamps are
+normalized inside its adapter. A timestamp source identifies whether the option timestamp came
+from a quote, trade, or snapshot. Massive supplies expiration as a date, so the adapter deliberately
+maps it to 4:00 p.m. `America/New_York` on that date and then converts it to UTC. Maturity uses
+ACT/365 elapsed seconds:
+
+```text
+T = max(expiration_utc - valuation_utc, 0) / (365 * 24 * 3600)
+```
+
+Expired contracts remain visible and receive an `EXPIRED` issue.
+
+### Quote quality and price selection
+
+An option midpoint exists only when bid and ask are present, non-negative, and `ask >= bid`:
+
+```text
+midpoint = (bid + ask) / 2
+```
+
+Missing, negative, crossed, stale, future-dated, expired, and arbitrage-invalid observations are
+preserved with structured issues. Empty issue lists mean valid quotes. The default analytics price
+is a fresh valid midpoint. A last trade is used only when `allow_last_price=true`; stale, future,
+crossed, negative, and expired quotes remain ineligible. Midpoint is an analytical convention and
+is not guaranteed executable.
+
+Staleness defaults to `MAX_QUOTE_AGE_SECONDS=900`. Valid two-sided quotes report absolute spread
+`ask - bid` and relative spread `(ask - bid) / midpoint` when the midpoint is positive. Volume,
+open interest, bid size, and ask size remain optional and are never fabricated.
+
+### Chain enrichment
+
+The chain engine sorts by expiration, option type, strike, and provider symbol. Each quote reports
+ACT/365 maturity, forward, `K/S` moneyness, `log(K/F)`, Phase 4 price bounds, selected market price,
+our own implied volatility, Phase 3 analytical Greeks, spread diagnostics, and every quality issue.
+A bad quote does not fail its chain. Provider IV and Greeks are retained only as reference fields.
+
+The summary counts contracts, valid and invalid quotes, midpoints, recovered IVs, arbitrage
+violations, stale quotes, calls, puts, and expirations. Smile extraction keeps calls and puts in
+separate unsmoothed expiration slices. Reusable filters cover expiration, type, strike, moneyness,
+midpoint availability, IV availability, and freshness.
+
+Put-call parity indexes quotes by expiration and strike, avoiding a quadratic scan. For fresh valid
+call and put midpoints it reports
+
+```text
+residual = (C_mid - P_mid) - (S exp(-qT) - K exp(-rT))
+```
+
+and flags residuals outside configurable absolute plus relative tolerance. It never repairs prices.
+See [docs/phase5-market-data.md](docs/phase5-market-data.md) for the complete field mapping and
+policy reference.
+
 ## Reproducibility and convergence
 
 Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
@@ -223,6 +307,7 @@ backend/app/
 ├── analytics/     # convergence, comparisons, sensitivity grids, batches, and smiles
 ├── api/           # FastAPI request models, limits, and thin adapters
 ├── core/          # environment settings, logging, errors, numerical guards
+├── market_data/   # provider protocol, Massive adapter, and deterministic fake
 ├── models/        # contracts, Greek/volatility configs, enums, and typed results
 ├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
 ├── pricing/       # prices, Greeks, IV inversion, comparisons, and transformations
@@ -371,6 +456,12 @@ Available endpoints:
 - `POST /api/volatility/implied/batch`
 - `POST /api/analytics/volatility/smile`
 - `POST /api/analytics/volatility/solver-comparison`
+- `GET /api/market-data/underlying/{symbol}`
+- `GET /api/market-data/options/{symbol}`
+- `GET /api/market-data/options/{symbol}/expirations`
+- `POST /api/analytics/options/chain`
+- `POST /api/analytics/options/smile`
+- `POST /api/analytics/options/put-call-parity`
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -431,8 +522,24 @@ MAX_CONVERGENCE_POINTS=20
 MAX_SENSITIVITY_POINTS=100
 MAX_IV_BATCH_SIZE=500
 MAX_SMILE_POINTS=200
+MAX_OPTION_CHAIN_CONTRACTS=5000
+MAX_QUOTE_AGE_SECONDS=900
+MARKET_DATA_PROVIDER=MASSIVE
+MARKET_DATA_API_KEY=
+MARKET_DATA_BASE_URL=https://api.massive.com
+MARKET_DATA_TIMEOUT_SECONDS=10
 LOG_LEVEL=INFO
 ```
+
+After supplying a Massive API key, optional manual connectivity checks are:
+
+```bash
+curl http://127.0.0.1:8000/api/market-data/underlying/SPY
+curl 'http://127.0.0.1:8000/api/market-data/options/SPY?expiration=2027-01-15'
+```
+
+These calls are manual and never run in CI. Provider entitlements determine quote availability and
+whether data is real-time or delayed.
 
 Invalid input and unsafe allocation requests return HTTP 422 with a clear detail. Raw terminal
 prices and payoff vectors never cross the API boundary. A stochastic run also needs enough
@@ -453,7 +560,9 @@ The normal suite uses fixed seeds, moderate sample sizes, analytical identities,
 cases, theoretical GBM moments, direct pair/control/CRN calculations, analytical Greek identities,
 and statistically scaled Monte Carlo tolerances such as `abs(estimate - benchmark) <= k * SE`.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
-pytest by project configuration.
+pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
+static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
+APIs, and an autouse socket guard rejects accidental network access.
 
 ## Model assumptions and limitations
 
@@ -471,6 +580,17 @@ pytest by project configuration.
 - Pathwise differentiation is limited to Delta and Vega
 - Implied volatility assumes a European Black-Scholes-Merton inverse with finite configured bounds
 - Synthetic smiles are independent strike points without interpolation or cross-maturity structure
+- Market bid/ask quotes may be missing, crossed, delayed, or stale; last trades may be older still
+- Midpoint is a research input and does not represent a guaranteed executable price
+- Chain analytics use an explicit flat interest rate and flat continuous dividend yield
+- Provider expirations are mapped to a documented 4:00 p.m. New York convention
+- No settlement, exercise, or instrument taxonomy beyond reported provider metadata is inferred
+
+U.S. listed equity and ETF options are generally American-style. Phase 5 preserves the provider's
+actual exercise style but uses European Black-Scholes implied volatility as a stated analytical
+convention until an American pricer exists. The enriched result marks this approximation. Early
+exercise value, discrete dividends, liquidity, transaction costs, and market microstructure are not
+modeled.
 
 At `T = 0`, both engines return intrinsic value. At `sigma = 0`, both use the discounted
 deterministic risk-neutral terminal payoff. Derived values outside finite floating-point range raise
@@ -478,10 +598,10 @@ a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
-Future phases can add full paths, additional variance-reduction techniques, market option chains,
-volatility-surface construction, binomial trees, American exercise and Longstaff-Schwartz, Asian
-and barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
+Future phases can add volatility-surface construction, quote-repair policy, full paths, additional
+variance-reduction techniques, binomial trees, American exercise and Longstaff-Schwartz, Asian and
+barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
-process, payoff, pricing, RNG, cluster, Greek, volatility, and result boundaries; none are
-implemented here.
+process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
+none are implemented here.

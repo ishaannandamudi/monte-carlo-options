@@ -35,3 +35,43 @@ class ImpliedVolatilityBracketError(ImpliedVolatilityError):
 
 class ImpliedVolatilityConvergenceError(ImpliedVolatilityError):
     """Raised when a valid bracketed or Newton solve does not converge."""
+
+
+class MarketDataError(QuantitativeError):
+    """Base class for normalized market-data and provider failures."""
+
+
+class MarketDataValidationError(MarketDataError):
+    """Raised when normalized market data cannot support requested analytics."""
+
+
+class ProviderError(MarketDataError):
+    """Base class for translated external-provider failures."""
+
+
+class ProviderAuthenticationError(ProviderError):
+    """Raised for missing or rejected provider credentials."""
+
+
+class ProviderRateLimitError(ProviderError):
+    """Raised when the provider rejects a request due to rate limits."""
+
+
+class ProviderSymbolNotFoundError(ProviderError):
+    """Raised when the requested market symbol is unavailable."""
+
+
+class ProviderMalformedResponseError(ProviderError):
+    """Raised when a provider response cannot be normalized safely."""
+
+
+class ProviderTimeoutError(ProviderError):
+    """Raised when an external provider request times out."""
+
+
+class ProviderNetworkError(ProviderError):
+    """Raised for other provider transport failures."""
+
+
+class ProviderServerError(ProviderError):
+    """Raised when the provider reports a server-side failure."""

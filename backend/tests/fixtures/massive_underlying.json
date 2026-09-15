@@ -1,0 +1,18 @@
+{
+  "status": "OK",
+  "request_id": "fixture-underlying",
+  "ticker": {
+    "ticker": "XYZ",
+    "updated": 1780324200000000000,
+    "lastQuote": {
+      "p": 99.9,
+      "P": 100.1,
+      "s": 20,
+      "S": 15,
+      "t": 1780324200000000000
+    },
+    "lastTrade": {"p": 100.0, "t": 1780324170000000000},
+    "prevDay": {"c": 99.5},
+    "day": {"v": 1250000}
+  }
+}

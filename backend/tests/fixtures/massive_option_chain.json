@@ -1,0 +1,90 @@
+{
+  "status": "OK",
+  "request_id": "fixture-chain",
+  "results": [
+    {
+      "details": {
+        "contract_type": "call",
+        "exercise_style": "american",
+        "expiration_date": "2026-12-18",
+        "shares_per_contract": 100,
+        "strike_price": 100,
+        "ticker": "O:XYZ261218C00100000"
+      },
+      "last_quote": {
+        "bid": 7.0,
+        "ask": 7.2,
+        "bid_size": 11,
+        "ask_size": 9,
+        "last_updated": 1780324200000000000
+      },
+      "last_trade": {
+        "price": 7.1,
+        "size": 2,
+        "sip_timestamp": 1780324170000000000
+      },
+      "day": {"volume": 850, "last_updated": 1780324200000000000},
+      "open_interest": 2400,
+      "implied_volatility": 0.25,
+      "greeks": {"delta": 0.55, "gamma": 0.03, "vega": 0.22, "theta": -0.04}
+    },
+    {
+      "details": {
+        "contract_type": "put",
+        "exercise_style": "american",
+        "expiration_date": "2026-12-18",
+        "shares_per_contract": 100,
+        "strike_price": 100,
+        "ticker": "O:XYZ261218P00100000"
+      },
+      "last_quote": {
+        "bid": 5.0,
+        "ask": 5.2,
+        "bid_size": 7,
+        "ask_size": 8,
+        "last_updated": 1780324200000000000
+      },
+      "last_trade": {"price": 5.1, "sip_timestamp": 1780324170000000000},
+      "day": {"volume": 630, "last_updated": 1780324200000000000},
+      "open_interest": 1900
+    },
+    {
+      "details": {
+        "contract_type": "call",
+        "exercise_style": "american",
+        "expiration_date": "2026-12-18",
+        "shares_per_contract": 100,
+        "strike_price": 110,
+        "ticker": "O:XYZ261218C00110000"
+      },
+      "last_quote": {
+        "ask": 3.0,
+        "ask_size": 4,
+        "last_updated": 1780318800000000000
+      },
+      "last_trade": {"price": 2.9, "sip_timestamp": 1780318800000000000},
+      "day": {"volume": 120, "last_updated": 1780318800000000000},
+      "open_interest": 450
+    },
+    {
+      "details": {
+        "contract_type": "put",
+        "exercise_style": "american",
+        "expiration_date": "2027-01-15",
+        "shares_per_contract": 100,
+        "strike_price": 90,
+        "ticker": "O:XYZ270115P00090000"
+      },
+      "last_quote": {
+        "bid": 2.0,
+        "ask": 1.0,
+        "bid_size": 2,
+        "ask_size": 2,
+        "last_updated": 1780324260000000000
+      },
+      "last_trade": {"price": 1.5, "sip_timestamp": 1780324170000000000},
+      "day": {"volume": 30, "last_updated": 1780324260000000000},
+      "open_interest": 75
+    }
+  ]
+}

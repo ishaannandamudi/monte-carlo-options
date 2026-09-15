@@ -273,9 +273,8 @@ Existing Phase 1–3 tests remain unchanged.
 
 ## 18. Deferred functionality
 
-Phase 4 creates reusable inversion and coordinate primitives for later real option chains and
-volatility surfaces. It intentionally does not add market-data adapters, quote cleaning, bid/ask
-policies, cross-strike or cross-maturity arbitrage checks, interpolation, extrapolation, SVI, local
-volatility, American-option IV, stochastic-volatility calibration, or any Phase 5 feature. Those
-features can call these typed bounds, forward, solver, batch, and diagnostic interfaces without
-replacing the Phase 1–3 pricing foundation.
+Phase 4 creates reusable inversion and coordinate primitives that the Phase 5 normalized option-
+chain layer now consumes. It does not add quote cleaning, cross-strike or cross-maturity arbitrage
+checks, interpolation, extrapolation, SVI, local volatility, American-option pricing, or stochastic-
+volatility calibration. Later surface and model phases can call these typed bounds, forward,
+solver, batch, and diagnostic interfaces without replacing the Phase 1–3 pricing foundation.

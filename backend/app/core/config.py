@@ -17,6 +17,12 @@ class Settings(BaseModel):
     max_sensitivity_points: int = Field(default=100, gt=0)
     max_iv_batch_size: int = Field(default=500, gt=0)
     max_smile_points: int = Field(default=200, gt=0)
+    max_option_chain_contracts: int = Field(default=5_000, gt=0)
+    max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
+    market_data_provider: Literal["MASSIVE"] = "MASSIVE"
+    market_data_api_key: str | None = None
+    market_data_base_url: str = "https://api.massive.com"
+    market_data_timeout_seconds: float = Field(default=10.0, gt=0.0)
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
 
     @classmethod
@@ -34,6 +40,18 @@ class Settings(BaseModel):
             values["max_iv_batch_size"] = value
         if value := os.getenv("MAX_SMILE_POINTS"):
             values["max_smile_points"] = value
+        if value := os.getenv("MAX_OPTION_CHAIN_CONTRACTS"):
+            values["max_option_chain_contracts"] = value
+        if value := os.getenv("MAX_QUOTE_AGE_SECONDS"):
+            values["max_quote_age_seconds"] = value
+        if value := os.getenv("MARKET_DATA_PROVIDER"):
+            values["market_data_provider"] = value.upper()
+        if value := os.getenv("MARKET_DATA_API_KEY"):
+            values["market_data_api_key"] = value
+        if value := os.getenv("MARKET_DATA_BASE_URL"):
+            values["market_data_base_url"] = value
+        if value := os.getenv("MARKET_DATA_TIMEOUT_SECONDS"):
+            values["market_data_timeout_seconds"] = value
         if value := os.getenv("LOG_LEVEL"):
             values["log_level"] = value.upper()
         return cls.model_validate(values)

@@ -9,11 +9,20 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.analytics import router as analytics_router
 from backend.app.api.greeks import router as greeks_router
+from backend.app.api.market_data import router as market_data_router
+from backend.app.api.options_analytics import router as options_analytics_router
 from backend.app.api.pricing import router as pricing_router
 from backend.app.api.volatility import analytics_router as volatility_analytics_router
 from backend.app.api.volatility import router as volatility_router
 from backend.app.core.config import get_settings
-from backend.app.core.exceptions import QuantitativeError
+from backend.app.core.exceptions import (
+    ProviderAuthenticationError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderSymbolNotFoundError,
+    ProviderTimeoutError,
+    QuantitativeError,
+)
 from backend.app.core.logging import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -29,8 +38,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.4.0",
-    description="European option pricing, Greeks, implied volatility, and analytics API",
+    version="0.5.0",
+    description="European option research, implied volatility, and normalized market-data API",
     lifespan=lifespan,
 )
 app.include_router(pricing_router)
@@ -38,6 +47,26 @@ app.include_router(analytics_router)
 app.include_router(greeks_router)
 app.include_router(volatility_router)
 app.include_router(volatility_analytics_router)
+app.include_router(market_data_router)
+app.include_router(options_analytics_router)
+
+
+@app.exception_handler(ProviderError)
+async def provider_error_handler(_: Request, exc: ProviderError) -> JSONResponse:
+    """Translate normalized provider failures without exposing credentials or payloads."""
+
+    if isinstance(exc, ProviderAuthenticationError):
+        status_code = 401
+    elif isinstance(exc, ProviderRateLimitError):
+        status_code = 429
+    elif isinstance(exc, ProviderSymbolNotFoundError):
+        status_code = 404
+    elif isinstance(exc, ProviderTimeoutError):
+        status_code = 504
+    else:
+        status_code = 502
+    logger.warning("provider_error type=%s error=%s", type(exc).__name__, exc)
+    return JSONResponse(status_code=status_code, content={"detail": str(exc)})
 
 
 @app.exception_handler(QuantitativeError)

@@ -1,5 +1,7 @@
 """Serializable quantitative result contracts."""
 
+from datetime import date, datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.models.greeks import (
@@ -7,6 +9,14 @@ from backend.app.models.greeks import (
     Greek,
     GreekMethod,
     SensitivityParameter,
+)
+from backend.app.models.market_data import (
+    MarketDataSource,
+    MarketPriceSource,
+    OptionQuote,
+    ParityStatus,
+    QuoteIssue,
+    UnderlyingQuote,
 )
 from backend.app.models.option import OptionType
 from backend.app.models.simulation import VarianceReduction
@@ -308,3 +318,108 @@ class ImpliedVolatilitySolverComparisonResult(ResultModel):
 
     target_price: float = Field(ge=0.0)
     points: list[SolverComparisonPoint]
+
+
+class EnrichedOptionQuote(ResultModel):
+    """Normalized quote plus quality, spread, IV, and canonical Greek analytics."""
+
+    quote: OptionQuote
+    market_price: float | None = Field(default=None, ge=0.0)
+    market_price_source: MarketPriceSource | None = None
+    maturity_years: float = Field(ge=0.0)
+    forward_price: float | None = Field(default=None, gt=0.0)
+    moneyness: float | None = Field(default=None, gt=0.0)
+    log_moneyness: float | None = None
+    price_lower_bound: float | None = Field(default=None, ge=0.0)
+    price_upper_bound: float | None = Field(default=None, ge=0.0)
+    implied_volatility: float | None = Field(default=None, ge=0.0)
+    iv_status: ImpliedVolatilityStatus | None = None
+    analytical_greeks: AnalyticalGreeksResult | None = None
+    quality_issues: list[QuoteIssue]
+    absolute_spread: float | None = Field(default=None, ge=0.0)
+    relative_spread: float | None = Field(default=None, ge=0.0)
+    european_bsm_approximation: bool
+
+
+class OptionChainSummary(ResultModel):
+    """Factual counts for one deterministic enriched chain."""
+
+    total_contracts: int = Field(ge=0)
+    valid_quotes: int = Field(ge=0)
+    invalid_quotes: int = Field(ge=0)
+    quotes_with_midpoint: int = Field(ge=0)
+    quotes_with_recovered_iv: int = Field(ge=0)
+    arbitrage_violations: int = Field(ge=0)
+    stale_quotes: int = Field(ge=0)
+    calls_count: int = Field(ge=0)
+    puts_count: int = Field(ge=0)
+    expiration_count: int = Field(ge=0)
+
+
+class EnrichedOptionChain(ResultModel):
+    """Provider-independent, deterministically sorted chain analytics."""
+
+    underlying_symbol: str
+    underlying_quote: UnderlyingQuote
+    valuation_time: datetime
+    source: MarketDataSource
+    risk_free_rate: float
+    dividend_yield: float
+    quotes: list[EnrichedOptionQuote]
+    summary: OptionChainSummary
+
+
+class MarketSmilePoint(ResultModel):
+    """One unsmoothed real-market smile observation."""
+
+    strike: float = Field(gt=0.0)
+    option_type: OptionType
+    market_price: float | None = Field(default=None, ge=0.0)
+    implied_volatility: float | None = Field(default=None, ge=0.0)
+    moneyness: float | None = Field(default=None, gt=0.0)
+    log_moneyness: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+    quality_issues: list[QuoteIssue]
+
+
+class MarketSmileResult(ResultModel):
+    """One expiration/type slice without interpolation or smoothing."""
+
+    underlying_symbol: str
+    expiration: datetime
+    option_type: OptionType
+    points: list[MarketSmilePoint]
+
+
+class PutCallParityPoint(ResultModel):
+    """One matched call-put midpoint parity diagnostic."""
+
+    strike: float = Field(gt=0.0)
+    expiration: datetime
+    maturity_years: float = Field(ge=0.0)
+    call_price: float = Field(ge=0.0)
+    put_price: float = Field(ge=0.0)
+    theoretical_difference: float
+    observed_difference: float
+    residual: float
+    relative_residual: float | None
+    status: ParityStatus
+
+
+class PutCallParityResult(ResultModel):
+    """Deterministically sorted matched pairs and unmatched-contract count."""
+
+    underlying_symbol: str
+    valuation_time: datetime
+    points: list[PutCallParityPoint]
+    matched_pairs: int = Field(ge=0)
+    violations: int = Field(ge=0)
+    unmatched_contracts: int = Field(ge=0)
+
+
+class OptionExpirationsResult(ResultModel):
+    """Normalized sorted expiration dates for one underlying symbol."""
+
+    underlying_symbol: str
+    expirations: list[date]
