@@ -79,3 +79,20 @@ def test_convergence_rejects_invalid_library_inputs() -> None:
         run_convergence(contract, market, [])
     with pytest.raises(ValueError):
         run_convergence(contract, market, [100, 0])
+
+
+@pytest.mark.parametrize("method", list(VarianceReduction))
+def test_convergence_supports_every_variance_reduction_method(
+    method: VarianceReduction,
+) -> None:
+    contract, market = inputs()
+    result = run_convergence(
+        contract,
+        market,
+        [1_000, 4_000, 16_000],
+        root_seed=202,
+        variance_reduction=method,
+    )
+    assert result.variance_reduction is method
+    assert len(result.points) == 3
+    assert all(point.standard_error > 0.0 for point in result.points)

@@ -14,7 +14,7 @@ class ResultModel(BaseModel):
 class MonteCarloResult(ResultModel):
     """Monte Carlo estimate and diagnostics without raw path data."""
 
-    price: float = Field(ge=0.0)
+    price: float
     standard_error: float = Field(ge=0.0)
     payoff_variance: float = Field(ge=0.0)
     discounted_payoff_std: float = Field(ge=0.0)
@@ -28,6 +28,15 @@ class MonteCarloResult(ResultModel):
     probability_itm: float = Field(ge=0.0, le=1.0)
     mean_terminal_price: float = Field(gt=0.0)
     terminal_price_std: float = Field(ge=0.0)
+    raw_price: float | None = Field(default=None, ge=0.0)
+    raw_standard_error: float | None = Field(default=None, ge=0.0)
+    adjusted_standard_error: float | None = Field(default=None, ge=0.0)
+    control_variate_beta: float | None = None
+    control_variate_mean: float | None = Field(default=None, gt=0.0)
+    control_variate_expected_mean: float | None = Field(default=None, gt=0.0)
+    raw_estimator_variance: float | None = Field(default=None, ge=0.0)
+    adjusted_estimator_variance: float | None = Field(default=None, ge=0.0)
+    variance_reduction_ratio: float | None = Field(default=None, ge=0.0)
 
 
 class BlackScholesResult(ResultModel):
@@ -51,7 +60,7 @@ class ConvergencePoint(ResultModel):
     """One independently seeded convergence observation."""
 
     num_simulations: int = Field(gt=0)
-    monte_carlo_price: float = Field(ge=0.0)
+    monte_carlo_price: float
     black_scholes_price: float = Field(ge=0.0)
     absolute_error: float = Field(ge=0.0)
     relative_error: float | None
@@ -71,3 +80,33 @@ class ConvergenceResult(ResultModel):
     root_seed: int = Field(ge=0)
     variance_reduction: VarianceReduction
     confidence_level: float = Field(gt=0.0, lt=1.0)
+
+
+class VarianceReductionComparisonPoint(ResultModel):
+    """One method in a fixed-budget variance-reduction comparison."""
+
+    method: VarianceReduction
+    price: float
+    black_scholes_price: float = Field(ge=0.0)
+    absolute_error: float = Field(ge=0.0)
+    standard_error: float = Field(ge=0.0)
+    estimator_variance: float = Field(ge=0.0)
+    raw_estimator_variance: float | None = Field(default=None, ge=0.0)
+    adjusted_estimator_variance: float | None = Field(default=None, ge=0.0)
+    variance_reduction_ratio: float | None = Field(default=None, ge=0.0)
+    relative_variance: float | None = Field(default=None, ge=0.0)
+    relative_efficiency: float | None = Field(default=None, ge=0.0)
+    confidence_interval_width: float = Field(ge=0.0)
+    runtime_ms: float = Field(ge=0.0)
+    control_variate_beta: float | None = None
+
+
+class VarianceReductionComparisonResult(ResultModel):
+    """All supported methods evaluated at one fixed total path budget."""
+
+    baseline_method: VarianceReduction
+    black_scholes_price: float = Field(ge=0.0)
+    num_simulations: int = Field(gt=0)
+    root_seed: int = Field(ge=0)
+    confidence_level: float = Field(gt=0.0, lt=1.0)
+    points: list[VarianceReductionComparisonPoint]

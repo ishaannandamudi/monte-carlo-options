@@ -7,10 +7,24 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class VarianceReduction(StrEnum):
-    """Phase 1 Monte Carlo variance-reduction choices."""
+    """Supported Monte Carlo variance-reduction choices."""
 
     NONE = "NONE"
     ANTITHETIC = "ANTITHETIC"
+    CONTROL_VARIATE = "CONTROL_VARIATE"
+    ANTITHETIC_CONTROL_VARIATE = "ANTITHETIC_CONTROL_VARIATE"
+
+    @property
+    def uses_antithetic(self) -> bool:
+        """Whether terminal normals must be generated as antithetic pairs."""
+
+        return self in {self.ANTITHETIC, self.ANTITHETIC_CONTROL_VARIATE}
+
+    @property
+    def uses_control_variate(self) -> bool:
+        """Whether discounted terminal stock controls the payoff estimator."""
+
+        return self in {self.CONTROL_VARIATE, self.ANTITHETIC_CONTROL_VARIATE}
 
 
 class RandomEngine(StrEnum):

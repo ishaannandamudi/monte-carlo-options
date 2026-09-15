@@ -20,9 +20,16 @@ def contract(maturity: float = 1.0) -> OptionContract:
     )
 
 
-def test_gbm_output_shape_and_positive_values() -> None:
+@pytest.mark.parametrize(
+    "method",
+    [VarianceReduction.ANTITHETIC, VarianceReduction.ANTITHETIC_CONTROL_VARIATE],
+)
+def test_antithetic_modes_preserve_exact_odd_shape_and_positive_values(
+    method: VarianceReduction,
+) -> None:
     config = SimulationConfig(
-        num_simulations=1_001, variance_reduction=VarianceReduction.ANTITHETIC
+        num_simulations=1_001,
+        variance_reduction=method,
     )
     values = GBMProcess().simulate_terminal(
         contract(),

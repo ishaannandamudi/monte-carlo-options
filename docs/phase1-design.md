@@ -269,3 +269,9 @@ would make ownership less clear and force premature interface commitments.
   clusters. No concurrency assumption is embedded in Phase 1.
 
 These are integration directions, not Phase 1 implementations.
+
+## Phase 2 extension note
+
+Phase 2 preserved these boundaries and added control-variate transformations over independent
+estimator clusters. The extended mathematics and common-randomness comparison policy are documented
+separately in [phase2-variance-reduction.md](phase2-variance-reduction.md).

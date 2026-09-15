@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from backend.app.core.numerics import finite_array_exp, finite_exp, require_finite
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract
-from backend.app.models.simulation import SimulationConfig, VarianceReduction
+from backend.app.models.simulation import SimulationConfig
 from backend.app.simulation.base import StochasticProcess
 
 
@@ -48,7 +48,7 @@ class GBMProcess(StochasticProcess):
                 )
             return np.full(count, deterministic_terminal, dtype=np.float64)
 
-        if config.variance_reduction is VarianceReduction.ANTITHETIC:
+        if config.variance_reduction.uses_antithetic:
             normals = self._antithetic_normals(count, rng)
         else:
             normals = np.asarray(rng.standard_normal(count), dtype=np.float64)

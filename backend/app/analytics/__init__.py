@@ -1,1 +1,1 @@
-"""Reusable statistical and convergence analytics."""
+"""Reusable statistics, convergence, and variance-reduction analytics."""

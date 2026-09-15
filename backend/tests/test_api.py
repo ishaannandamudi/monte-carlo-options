@@ -171,3 +171,96 @@ def test_quantitative_domain_failure_returns_clear_422(client: TestClient) -> No
     )
     assert response.status_code == 422
     assert "floating-point range" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "NONE",
+        "ANTITHETIC",
+        "CONTROL_VARIATE",
+        "ANTITHETIC_CONTROL_VARIATE",
+    ],
+)
+def test_monte_carlo_api_accepts_all_variance_reduction_methods(
+    client: TestClient, method: str
+) -> None:
+    simulation = base_simulation()
+    simulation["variance_reduction"] = method
+    response = client.post(
+        "/api/pricing/monte-carlo",
+        json={
+            "contract": base_contract(),
+            "market": base_market(),
+            "simulation": simulation,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["variance_reduction"] == method
+
+
+def test_control_variate_diagnostics_serialize(client: TestClient) -> None:
+    simulation = base_simulation()
+    simulation["variance_reduction"] = "ANTITHETIC_CONTROL_VARIATE"
+    response = client.post(
+        "/api/pricing/compare",
+        json={
+            "contract": base_contract(),
+            "market": base_market(),
+            "simulation": simulation,
+        },
+    )
+    assert response.status_code == 200
+    monte_carlo = response.json()["monte_carlo"]
+    assert monte_carlo["control_variate_beta"] is not None
+    assert monte_carlo["raw_standard_error"] > monte_carlo["standard_error"]
+    assert monte_carlo["adjusted_standard_error"] == monte_carlo["standard_error"]
+
+
+def test_invalid_variance_reduction_method_returns_422(client: TestClient) -> None:
+    simulation = base_simulation()
+    simulation["variance_reduction"] = "STRATIFIED"
+    response = client.post(
+        "/api/pricing/monte-carlo",
+        json={
+            "contract": base_contract(),
+            "market": base_market(),
+            "simulation": simulation,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_variance_reduction_comparison_endpoint(client: TestClient) -> None:
+    response = client.post(
+        "/api/analytics/variance-reduction",
+        json={
+            "contract": base_contract(),
+            "market": base_market(),
+            "num_simulations": 20_000,
+            "root_seed": 42,
+            "confidence_level": 0.95,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["baseline_method"] == "NONE"
+    assert [point["method"] for point in body["points"]] == [
+        "NONE",
+        "ANTITHETIC",
+        "CONTROL_VARIATE",
+        "ANTITHETIC_CONTROL_VARIATE",
+    ]
+
+
+def test_variance_reduction_endpoint_preserves_api_limit(client: TestClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(max_api_simulations=100)
+    response = client.post(
+        "/api/analytics/variance-reduction",
+        json={
+            "contract": base_contract(),
+            "market": base_market(),
+            "num_simulations": 101,
+        },
+    )
+    assert response.status_code == 422

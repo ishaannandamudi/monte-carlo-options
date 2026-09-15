@@ -27,12 +27,29 @@ def make_contract(
     )
 
 
-def test_same_seed_reproduces_all_quantitative_outputs() -> None:
-    config = SimulationConfig(num_simulations=10_000, seed=81)
+@pytest.mark.parametrize("method", list(VarianceReduction))
+def test_same_seed_reproduces_all_quantitative_outputs(method: VarianceReduction) -> None:
+    config = SimulationConfig(num_simulations=10_000, seed=81, variance_reduction=method)
     market = MarketEnvironment(risk_free_rate=0.05, volatility=0.2)
     first = MonteCarloPricer().price(make_contract(), market, config)
     second = MonteCarloPricer().price(make_contract(), market, config)
     assert first.model_dump(exclude={"runtime_ms"}) == second.model_dump(exclude={"runtime_ms"})
+
+
+@pytest.mark.parametrize("method", list(VarianceReduction))
+def test_different_seed_changes_stochastic_price(method: VarianceReduction) -> None:
+    market = MarketEnvironment(risk_free_rate=0.05, volatility=0.2)
+    first = MonteCarloPricer().price(
+        make_contract(),
+        market,
+        SimulationConfig(num_simulations=10_000, seed=81, variance_reduction=method),
+    )
+    second = MonteCarloPricer().price(
+        make_contract(),
+        market,
+        SimulationConfig(num_simulations=10_000, seed=82, variance_reduction=method),
+    )
+    assert first.price != second.price
 
 
 @pytest.mark.parametrize("option_type", [OptionType.CALL, OptionType.PUT])
@@ -155,6 +172,120 @@ def test_equality_at_strike_is_not_itm(option_type: OptionType) -> None:
         SimulationConfig(num_simulations=3),
     )
     assert result.probability_itm == 0.0
+
+
+@pytest.mark.parametrize(
+    "method",
+    [VarianceReduction.CONTROL_VARIATE, VarianceReduction.ANTITHETIC_CONTROL_VARIATE],
+)
+def test_control_variate_diagnostics_are_finite_and_consistent(
+    method: VarianceReduction,
+) -> None:
+    result = MonteCarloPricer().price(
+        make_contract(),
+        MarketEnvironment(risk_free_rate=0.05, volatility=0.2, dividend_yield=0.02),
+        SimulationConfig(num_simulations=50_000, seed=42, variance_reduction=method),
+    )
+    assert result.raw_price is not None
+    assert result.raw_standard_error is not None
+    assert result.adjusted_standard_error == result.standard_error
+    assert result.control_variate_beta is not None
+    assert math.isfinite(result.control_variate_beta)
+    assert result.control_variate_mean is not None
+    assert result.control_variate_expected_mean == pytest.approx(100.0 * math.exp(-0.02))
+    assert result.raw_estimator_variance == pytest.approx(result.raw_standard_error**2)
+    assert result.adjusted_estimator_variance == pytest.approx(result.standard_error**2)
+    assert result.variance_reduction_ratio == pytest.approx(
+        result.raw_estimator_variance / result.adjusted_estimator_variance
+    )
+
+
+@pytest.mark.parametrize(
+    "method",
+    [VarianceReduction.NONE, VarianceReduction.ANTITHETIC],
+)
+def test_phase1_methods_keep_control_diagnostics_unavailable(method: VarianceReduction) -> None:
+    result = MonteCarloPricer().price(
+        make_contract(),
+        MarketEnvironment(risk_free_rate=0.05, volatility=0.2),
+        SimulationConfig(num_simulations=1_000, variance_reduction=method),
+    )
+    assert result.raw_price is None
+    assert result.control_variate_beta is None
+    assert result.raw_estimator_variance is None
+    assert result.variance_reduction_ratio is None
+
+
+@pytest.mark.parametrize(
+    "method",
+    [VarianceReduction.CONTROL_VARIATE, VarianceReduction.ANTITHETIC_CONTROL_VARIATE],
+)
+@pytest.mark.parametrize("maturity", [0.0, 1.0])
+def test_control_variate_deterministic_fallback(method: VarianceReduction, maturity: float) -> None:
+    result = MonteCarloPricer().price(
+        make_contract(maturity=maturity),
+        MarketEnvironment(risk_free_rate=-0.02, volatility=0.0, dividend_yield=0.01),
+        SimulationConfig(num_simulations=5, variance_reduction=method),
+    )
+    assert result.price == result.raw_price
+    assert result.control_variate_beta == 0.0
+    assert result.standard_error == 0.0
+    assert result.raw_estimator_variance == 0.0
+    assert result.adjusted_estimator_variance == 0.0
+    assert result.variance_reduction_ratio is None
+
+
+@pytest.mark.parametrize(
+    "method",
+    [VarianceReduction.CONTROL_VARIATE, VarianceReduction.ANTITHETIC_CONTROL_VARIATE],
+)
+@pytest.mark.parametrize("option_type", [OptionType.CALL, OptionType.PUT])
+def test_control_methods_support_negative_rates(
+    method: VarianceReduction, option_type: OptionType
+) -> None:
+    option = make_contract(option_type)
+    market = MarketEnvironment(risk_free_rate=-0.01, volatility=0.25, dividend_yield=0.03)
+    result = MonteCarloPricer().price(
+        option,
+        market,
+        SimulationConfig(num_simulations=100_000, seed=66, variance_reduction=method),
+    )
+    analytical = black_scholes_price(option, market)
+    assert abs(result.price - analytical) <= 5.0 * result.standard_error
+
+
+@pytest.mark.parametrize(
+    ("spot", "strike", "maturity", "volatility"),
+    [
+        (100.0, 100.0, 1e-12, 0.2),
+        (100.0, 100.0, 1.0, 1e-12),
+        (250.0, 50.0, 1.0, 0.2),
+        (50.0, 250.0, 1.0, 0.2),
+    ],
+)
+@pytest.mark.parametrize(
+    "method",
+    [VarianceReduction.CONTROL_VARIATE, VarianceReduction.ANTITHETIC_CONTROL_VARIATE],
+)
+def test_control_methods_keep_edge_case_outputs_finite(
+    spot: float,
+    strike: float,
+    maturity: float,
+    volatility: float,
+    method: VarianceReduction,
+) -> None:
+    result = MonteCarloPricer().price(
+        make_contract(spot=spot, strike=strike, maturity=maturity),
+        MarketEnvironment(risk_free_rate=-0.01, volatility=volatility, dividend_yield=-0.02),
+        SimulationConfig(num_simulations=5_001, seed=93, variance_reduction=method),
+    )
+    numeric_values = [
+        value
+        for value in result.model_dump().values()
+        if isinstance(value, int | float) and not isinstance(value, bool)
+    ]
+    assert result.num_simulations == 5_001
+    assert all(math.isfinite(float(value)) for value in numeric_values)
 
 
 @pytest.mark.parametrize("variance_reduction", list(VarianceReduction))

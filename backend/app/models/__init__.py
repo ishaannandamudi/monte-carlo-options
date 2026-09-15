@@ -8,6 +8,8 @@ from backend.app.models.results import (
     ConvergenceResult,
     MonteCarloResult,
     PricingComparison,
+    VarianceReductionComparisonPoint,
+    VarianceReductionComparisonResult,
 )
 from backend.app.models.simulation import RandomEngine, SimulationConfig, VarianceReduction
 
@@ -24,4 +26,6 @@ __all__ = [
     "RandomEngine",
     "SimulationConfig",
     "VarianceReduction",
+    "VarianceReductionComparisonPoint",
+    "VarianceReductionComparisonResult",
 ]

@@ -1,18 +1,19 @@
 # Monte Carlo Options
 
-Monte Carlo Options is the quantitative foundation for a long-term derivatives-research
-platform. Phase 1 focuses on one problem and makes it reliable: pricing European calls and puts
-under constant-market risk-neutral geometric Brownian motion (GBM), with a Black-Scholes-Merton
-benchmark and statistically sound uncertainty diagnostics.
+Monte Carlo Options is the quantitative foundation for a long-term derivatives-research platform.
+The current implementation prices European calls and puts under constant-market risk-neutral
+geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
+uncertainty diagnostics, and advanced variance reduction.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
 
-## Phase 1 capabilities
+## Current capabilities
 
 - Validated European call and put contracts and separate constant market assumptions
 - Risk-neutral GBM terminal simulation with continuous dividend yield
 - Plain Monte Carlo and antithetic variates
+- Discounted-terminal-stock control variates and combined antithetic plus control variates
 - Discounted-payoff sample variance, standard deviation, standard error, and configurable normal
   confidence intervals
 - Exact pair-level uncertainty treatment for even antithetic samples and an explicit weighted
@@ -20,12 +21,13 @@ currency-safe decimal amounts.
 - Black-Scholes-Merton analytical pricing with dividends
 - Monte Carlo versus analytical error, z-score, and interval-containment diagnostics
 - Independently seeded, reproducible convergence experiments and empirical standard-error slopes
+- Fixed-budget comparisons across all four variance-reduction modes
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-Phase 1 deliberately does not implement Greeks, implied volatility, market data, path-dependent or
+The current scope deliberately excludes Greeks, implied volatility, market data, path-dependent or
 American options, trees, calibration, stochastic volatility, jumps, multi-asset models, portfolio
-risk, parallelism, a GPU backend, or a frontend.
+risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
 
@@ -61,6 +63,35 @@ cluster of size one. The full formula and rationale are in
 Antithetic sampling often lowers variance for vanilla options, but it is not guaranteed to improve
 every payoff and parameter set.
 
+## Control variates
+
+The control variable is discounted terminal stock:
+
+```text
+X = exp(-rT) S_T
+E[X] = S_0 exp(-qT)
+```
+
+For discounted payoff `Y`, the sample estimates
+
+```text
+beta_hat = Cov(Y, X) / Var(X)
+Y_cv = Y - beta_hat (X - E[X])
+```
+
+The returned price and standard error come from `Y_cv`. Results retain the raw price and raw SE,
+estimated beta, sample and known control means, raw and adjusted estimator variances, and the
+variance-reduction ratio `raw estimator variance / adjusted estimator variance`. The two estimator
+variances equal their corresponding standard errors squared; `payoff_variance` remains the variance
+of individual discounted payoff values. A ratio above one indicates improvement for that sample;
+no universal improvement is assumed. If control variance is zero, beta falls back to zero and the
+adjusted estimate equals the raw estimate.
+
+For `ANTITHETIC_CONTROL_VARIATE`, payoff and control values are both averaged within independent
+antithetic clusters before beta is estimated or adjustment and SE are calculated. Odd counts retain
+the singleton's one-path weight. See the explicit derivation in
+[docs/phase2-variance-reduction.md](docs/phase2-variance-reduction.md).
+
 ## Reproducibility and convergence
 
 Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
@@ -76,22 +107,29 @@ one shared stream. Valid positive standard errors are fitted by ordinary least s
 log(SE) = a + b log(N)
 ```
 
-For ordinary Monte Carlo, the expected asymptotic slope is approximately `b = -0.5`. If fewer than
-two positive-SE points exist, the slope is returned as unavailable rather than raising an error.
+For all four methods, the expected asymptotic slope remains approximately `b = -0.5`. Variance
+reduction lowers the error's constant factor; it does not change the IID Monte Carlo order. If fewer
+than two positive-SE points exist, the slope is returned as unavailable rather than raising an
+error.
+
+Method comparisons use the same root seed for all modes. `NONE` and `CONTROL_VARIATE` therefore
+share path normals, while `ANTITHETIC` and `ANTITHETIC_CONTROL_VARIATE` share primary normals and
+pairing. Relative variance is method estimator variance divided by the `NONE` variance; relative
+efficiency is its reciprocal. Runtime is reported separately and is not mixed into either metric.
 
 ## Repository structure
 
 ```text
 backend/app/
-├── analytics/     # sample statistics and convergence experiments
+├── analytics/     # statistics, convergence, and method comparisons
 ├── api/           # FastAPI request models, limits, and thin adapters
 ├── core/          # environment settings, logging, errors, numerical guards
 ├── models/        # contracts, market/config enums, typed result models
 ├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
-├── pricing/       # pricing abstraction, Monte Carlo, Black-Scholes, comparison
+├── pricing/       # pricers, comparisons, and estimator transformations
 └── simulation/    # process abstraction, GBM, PCG64/SeedSequence ownership
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
-benchmarks/        # reserved for opt-in Phase 1 benchmarks
+benchmarks/        # reserved for opt-in quantitative benchmarks
 docs/              # architecture and numerical methodology
 experiments/       # reserved for explicit research experiments
 ```
@@ -131,7 +169,7 @@ market = MarketEnvironment(
 simulation = SimulationConfig(
     num_simulations=100_000,
     seed=42,
-    variance_reduction=VarianceReduction.ANTITHETIC,
+    variance_reduction=VarianceReduction.ANTITHETIC_CONTROL_VARIATE,
     confidence_level=0.95,
 )
 
@@ -139,7 +177,7 @@ comparison = compare_prices(contract, market, simulation)
 print(comparison.model_dump())
 ```
 
-`batch_size` is validated as an optional execution hint. Phase 1 intentionally evaluates a single
+`batch_size` is validated as an optional execution hint. The current engine evaluates a single
 vector; changing `batch_size` does not change the random stream or quantitative output.
 
 ## API
@@ -177,7 +215,7 @@ curl -X POST http://127.0.0.1:8000/api/pricing/monte-carlo \
     "simulation": {
       "num_simulations": 100000,
       "seed": 42,
-      "variance_reduction": "ANTITHETIC",
+      "variance_reduction": "ANTITHETIC_CONTROL_VARIATE",
       "random_engine": "PCG64",
       "confidence_level": 0.95
     }
@@ -191,10 +229,28 @@ Available endpoints:
 - `POST /api/pricing/black-scholes`
 - `POST /api/pricing/compare`
 - `POST /api/analytics/convergence`
+- `POST /api/analytics/variance-reduction`
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
 `/docs` while the service is running.
+
+Compare every variance-reduction method with one fixed budget:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/analytics/variance-reduction \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "CALL", "exercise_style": "EUROPEAN",
+      "spot": 100.0, "strike": 100.0, "maturity_years": 1.0
+    },
+    "market": {
+      "risk_free_rate": 0.05, "volatility": 0.2, "dividend_yield": 0.01
+    },
+    "num_simulations": 100000, "root_seed": 42, "confidence_level": 0.95
+  }'
+```
 
 API allocation limits come from environment variables and do not constrain direct library use:
 
@@ -220,11 +276,11 @@ zero uncertainty; deterministic cases remain exact.
 ```
 
 The normal suite uses fixed seeds, moderate sample sizes, analytical identities, deterministic edge
-cases, theoretical GBM moments, and statistically scaled Monte Carlo tolerances such as
-`abs(MC - BS) <= k * SE`. Resource-intensive checks belong under the `performance` marker and are
-excluded from ordinary pytest by project configuration.
+cases, theoretical GBM moments, direct pair/control calculations, and statistically scaled Monte
+Carlo tolerances such as `abs(MC - BS) <= k * SE`. Resource-intensive checks belong under the
+`performance` marker and are excluded from ordinary pytest by project configuration.
 
-## Phase 1 assumptions and limitations
+## Model assumptions and limitations
 
 - European exercise only
 - Frictionless market and continuous trading as assumed by Black-Scholes
@@ -243,9 +299,10 @@ a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
-Future phases can add full paths, additional variance reduction, Greeks, implied volatility,
+Future phases can add full paths, additional variance-reduction techniques, Greeks, implied
+volatility,
 market option chains, binomial trees, American exercise and Longstaff-Schwartz, Asian and barrier
 payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime switching,
 portfolio Greeks and risk, performance work, quasi-Monte Carlo, and eventually an interactive
-dashboard. Those features are architectural consumers of the Phase 1 contract, process, payoff,
-pricing, RNG, and result boundaries; none are implemented here.
+dashboard. Those features are architectural consumers of the existing contract, process, payoff,
+pricing, RNG, cluster, and result boundaries; none are implemented here.

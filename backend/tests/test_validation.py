@@ -84,7 +84,7 @@ def test_simulation_config_rejects_invalid_values(field: str, value: float) -> N
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("variance_reduction", "CONTROL_VARIATE"),
+        ("variance_reduction", "STRATIFIED"),
         ("random_engine", "MT19937"),
     ],
 )

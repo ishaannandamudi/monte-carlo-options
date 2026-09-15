@@ -22,6 +22,11 @@ from backend.app.models.results import MonteCarloResult
 from backend.app.models.simulation import SimulationConfig, VarianceReduction
 from backend.app.payoffs.vanilla import vanilla_payoff
 from backend.app.pricing.base import Pricer
+from backend.app.pricing.variance_reduction import (
+    apply_control_variate,
+    cluster_observations,
+    discounted_stock_control,
+)
 from backend.app.simulation.base import StochasticProcess
 from backend.app.simulation.gbm import GBMProcess
 from backend.app.simulation.random import create_rng
@@ -43,7 +48,7 @@ class MonteCarloPricer(Pricer[SimulationConfig, MonteCarloResult]):
     ) -> MonteCarloResult:
         """Return a reproducible estimate; ``batch_size`` is an inert execution hint.
 
-        Phase 1 generates one vector so every configured batch size preserves the
+        The current engine generates one vector so every configured batch size preserves the
         identical PCG64 stream and numerical result. API limits bound allocation.
         """
 
@@ -68,19 +73,70 @@ class MonteCarloPricer(Pricer[SimulationConfig, MonteCarloResult]):
         discounted_payoffs = np.asarray(discount * payoffs, dtype=np.float64)
         require_finite(discounted_payoffs, context="discounted payoffs")
 
-        estimate = sample_mean(discounted_payoffs)
+        raw_estimate = sample_mean(discounted_payoffs)
         deterministic = contract.maturity_years == 0.0 or market.volatility == 0.0
+        raw_price: float | None = None
+        raw_standard_error: float | None = None
+        adjusted_standard_error: float | None = None
+        control_beta: float | None = None
+        control_mean: float | None = None
+        control_expected_mean: float | None = None
+        raw_estimator_variance: float | None = None
+        adjusted_estimator_variance: float | None = None
+        variance_reduction_ratio: float | None = None
+
         if deterministic:
             payoff_variance = 0.0
             payoff_std = 0.0
             estimator_se = 0.0
             terminal_std = 0.0
+            estimate = raw_estimate
+            if config.variance_reduction.uses_control_variate:
+                control, control_expected_mean = discounted_stock_control(
+                    terminal_prices, contract, market
+                )
+                raw_price = raw_estimate
+                raw_standard_error = 0.0
+                adjusted_standard_error = 0.0
+                control_beta = 0.0
+                control_mean = sample_mean(control)
+                raw_estimator_variance = 0.0
+                adjusted_estimator_variance = 0.0
         else:
             payoff_variance = sample_variance(discounted_payoffs)
             payoff_std = math.sqrt(payoff_variance)
-            if config.variance_reduction is VarianceReduction.ANTITHETIC:
+            if config.variance_reduction.uses_control_variate:
+                control, control_expected_mean = discounted_stock_control(
+                    terminal_prices, contract, market
+                )
+                raw_clusters = cluster_observations(
+                    discounted_payoffs,
+                    antithetic=config.variance_reduction.uses_antithetic,
+                )
+                control_clusters = cluster_observations(
+                    control,
+                    antithetic=config.variance_reduction.uses_antithetic,
+                )
+                adjustment = apply_control_variate(
+                    raw_clusters,
+                    control_clusters,
+                    control_expected_mean,
+                )
+                estimate = adjustment.adjusted_price
+                estimator_se = adjustment.adjusted_standard_error
+                raw_price = adjustment.raw_price
+                raw_standard_error = adjustment.raw_standard_error
+                adjusted_standard_error = adjustment.adjusted_standard_error
+                control_beta = adjustment.beta
+                control_mean = adjustment.control_mean
+                raw_estimator_variance = adjustment.raw_estimator_variance
+                adjusted_estimator_variance = adjustment.adjusted_estimator_variance
+                variance_reduction_ratio = adjustment.variance_reduction_ratio
+            elif config.variance_reduction is VarianceReduction.ANTITHETIC:
+                estimate = raw_estimate
                 estimator_se = antithetic_standard_error(discounted_payoffs)
             else:
+                estimate = raw_estimate
                 estimator_se = standard_error(discounted_payoffs)
             terminal_std = sample_standard_deviation(terminal_prices)
         ci_low, ci_high = confidence_interval(estimate, estimator_se, config.confidence_level)
@@ -106,6 +162,15 @@ class MonteCarloPricer(Pricer[SimulationConfig, MonteCarloResult]):
             probability_itm=float(np.mean(itm)),
             mean_terminal_price=sample_mean(terminal_prices),
             terminal_price_std=terminal_std,
+            raw_price=raw_price,
+            raw_standard_error=raw_standard_error,
+            adjusted_standard_error=adjusted_standard_error,
+            control_variate_beta=control_beta,
+            control_variate_mean=control_mean,
+            control_variate_expected_mean=control_expected_mean,
+            raw_estimator_variance=raw_estimator_variance,
+            adjusted_estimator_variance=adjusted_estimator_variance,
+            variance_reduction_ratio=variance_reduction_ratio,
         )
         logger.info(
             "monte_carlo_complete simulations=%d variance_reduction=%s runtime_ms=%.3f",

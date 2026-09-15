@@ -1,4 +1,4 @@
-"""Thin HTTP adapter for convergence experiments."""
+"""Thin HTTP adapters for convergence and variance-reduction experiments."""
 
 import logging
 from typing import Annotated
@@ -7,12 +7,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.analytics.convergence import run_convergence
+from backend.app.analytics.variance_reduction import compare_variance_reduction_methods
 from backend.app.api.pricing import _enforce_simulation_limit
 from backend.app.core.config import Settings, get_settings
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract
-from backend.app.models.results import ConvergenceResult
-from backend.app.models.simulation import ConfidenceLevel, NonNegativeInt, VarianceReduction
+from backend.app.models.results import ConvergenceResult, VarianceReductionComparisonResult
+from backend.app.models.simulation import (
+    ConfidenceLevel,
+    NonNegativeInt,
+    PositiveInt,
+    VarianceReduction,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -28,6 +34,18 @@ class ConvergenceRequest(BaseModel):
     simulation_counts: list[Annotated[int, Field(gt=0)]] = Field(min_length=1)
     root_seed: NonNegativeInt = 42
     variance_reduction: VarianceReduction = VarianceReduction.ANTITHETIC
+    confidence_level: ConfidenceLevel = 0.95
+
+
+class VarianceReductionRequest(BaseModel):
+    """One fixed-budget experiment across every supported method."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    contract: OptionContract
+    market: MarketEnvironment
+    num_simulations: PositiveInt = 100_000
+    root_seed: NonNegativeInt = 42
     confidence_level: ConfidenceLevel = 0.95
 
 
@@ -59,5 +77,23 @@ def convergence_analysis(
         request.simulation_counts,
         root_seed=request.root_seed,
         variance_reduction=request.variance_reduction,
+        confidence_level=request.confidence_level,
+    )
+
+
+@router.post("/variance-reduction", response_model=VarianceReductionComparisonResult)
+def variance_reduction_analysis(
+    request: VarianceReductionRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> VarianceReductionComparisonResult:
+    """Compare all four methods under one bounded total path count."""
+
+    _enforce_simulation_limit(request.num_simulations, settings)
+    logger.info("variance_reduction_request simulations=%d", request.num_simulations)
+    return compare_variance_reduction_methods(
+        request.contract,
+        request.market,
+        request.num_simulations,
+        root_seed=request.root_seed,
         confidence_level=request.confidence_level,
     )
