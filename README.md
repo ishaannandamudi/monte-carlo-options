@@ -3,7 +3,8 @@
 Monte Carlo Options is the quantitative foundation for a long-term derivatives-research platform.
 The current implementation prices European calls and puts under constant-market risk-neutral
 geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
-uncertainty diagnostics, advanced variance reduction, and first-class Greeks.
+uncertainty diagnostics, advanced variance reduction, first-class Greeks, and robust implied-
+volatility inversion.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -26,12 +27,15 @@ currency-safe decimal amounts.
 - Common-Random-Number finite-difference Greeks with direct estimator uncertainty
 - Pathwise Delta and Vega with plain or antithetic sampling
 - Analytical-versus-stochastic Greek comparisons and one-dimensional sensitivity grids
+- Brent, bisection, Newton, and guarded AUTO implied-volatility solvers
+- European no-arbitrage validation, exact-expiry policy, and reconstruction diagnostics
+- Ordered batch inversion with per-observation failures and synthetic volatility-smile slices
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes implied volatility, market data, path-dependent or American
-options, trees, calibration, stochastic volatility, jumps, multi-asset models, portfolio risk,
-parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
+The current scope deliberately excludes real market data, volatility-surface interpolation,
+path-dependent or American options, trees, calibration, stochastic volatility, jumps, multi-asset
+models, portfolio risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
 
@@ -150,6 +154,43 @@ SE calculated from independent paths or pair clusters. Pathwise Gamma is intenti
 because naively differentiating the payoff indicator does not produce a valid second-derivative
 estimator.
 
+## Implied volatility
+
+Implied volatility is the non-negative volatility `sigma` that makes the existing analytical
+Black-Scholes-Merton price equal an observed European option price. Phase 4 treats the risk-free
+rate and dividend yield as known inputs in a dedicated model; it does not put a placeholder
+volatility into `MarketEnvironment`.
+
+Before solving, the library checks the continuous-dividend European bounds. With
+`A = S exp(-qT)` and `B = K exp(-rT)`, call prices must lie in `[max(A-B, 0), A]` and put prices in
+`[max(B-A, 0), B]`. A target outside its interval is rejected before any root evaluation. The
+lower bound is recovered as zero volatility when it matches the configured zero-volatility
+endpoint. An exact upper-bound price has no finite implied volatility and returns a typed failure.
+At exact expiry, a price equal to intrinsic value is valid, but volatility is not identifiable, so
+the result reports `implied_volatility=null` and `NON_IDENTIFIABLE`.
+
+The solver methods are:
+
+- `BRENT`: a SciPy bracketed solve with a price-aware absolute volatility tolerance.
+- `BISECTION`: an explicit deterministic bracket-preserving solve that requires both price and
+  volatility interval tolerances.
+- `NEWTON`: Newton-Raphson using Phase 3 analytical raw-unit Vega, with guards for small Vega,
+  non-finite values, stagnation, and steps outside the configured bracket.
+- `AUTO`: tries Newton, falls back to Brent on an unsafe Newton step, then uses bisection if Brent
+  cannot converge.
+
+Every successful result is repriced and accepted only when its absolute price residual meets
+`price_tolerance`. Diagnostics include the requested and used methods, iterations, counted pricing
+evaluations, final price, residual, bracket, runtime, final Vega, and optional `1 / Vega` price-to-
+volatility sensitivity. Small Vega signals an ill-conditioned inversion: a small price change can
+produce a large volatility change. Full formulas and boundary policies are in
+[docs/phase4-implied-volatility.md](docs/phase4-implied-volatility.md).
+
+Batch inversion preserves input order and returns success or a typed failure for every observation.
+Synthetic smile analysis computes `moneyness = K/S` and forward log-moneyness `log(K/F)`, where
+`F = S exp((r-q)T)`. It returns a single maturity slice only; interpolation, surface fitting, and
+arbitrage repair are outside Phase 4.
+
 ## Reproducibility and convergence
 
 Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
@@ -179,12 +220,12 @@ efficiency is its reciprocal. Runtime is reported separately and is not mixed in
 
 ```text
 backend/app/
-├── analytics/     # convergence, estimator comparisons, and sensitivity grids
+├── analytics/     # convergence, comparisons, sensitivity grids, batches, and smiles
 ├── api/           # FastAPI request models, limits, and thin adapters
 ├── core/          # environment settings, logging, errors, numerical guards
-├── models/        # contracts, Greek/config enums, and typed result models
+├── models/        # contracts, Greek/volatility configs, enums, and typed results
 ├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
-├── pricing/       # prices, Greeks, comparisons, and estimator transformations
+├── pricing/       # prices, Greeks, IV inversion, comparisons, and transformations
 └── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # reserved for opt-in quantitative benchmarks
@@ -251,6 +292,24 @@ pathwise = pathwise_greeks(
 )
 ```
 
+Implied-volatility round trip:
+
+```python
+from backend.app.models.volatility import (
+    ImpliedVolatilityMarket,
+    ImpliedVolatilityObservation,
+)
+from backend.app.pricing.implied_volatility import solve_implied_volatility
+
+observation = ImpliedVolatilityObservation(
+    contract=contract,
+    market=ImpliedVolatilityMarket(risk_free_rate=0.05, dividend_yield=0.01),
+    observed_price=9.826297782739111,
+)
+iv_result = solve_implied_volatility(observation)
+print(iv_result.implied_volatility)  # approximately 0.20
+```
+
 `batch_size` is validated as an optional execution hint. The current engine evaluates a single
 vector; changing `batch_size` does not change the random stream or quantitative output.
 
@@ -308,6 +367,10 @@ Available endpoints:
 - `POST /api/greeks/monte-carlo`
 - `POST /api/analytics/greeks/compare`
 - `POST /api/analytics/sensitivity`
+- `POST /api/volatility/implied`
+- `POST /api/volatility/implied/batch`
+- `POST /api/analytics/volatility/smile`
+- `POST /api/analytics/volatility/solver-comparison`
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -343,12 +406,31 @@ to `/api/greeks/monte-carlo`, together with:
 The optional `bump_config` object overrides individual bump defaults. `PATHWISE` accepts Delta and
 Vega with `NONE` or `ANTITHETIC` variance reduction. Unsupported combinations return HTTP 422.
 
+Single implied-volatility solve:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/volatility/implied \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "CALL", "exercise_style": "EUROPEAN",
+      "spot": 100.0, "strike": 100.0, "maturity_years": 1.0
+    },
+    "risk_free_rate": 0.05,
+    "dividend_yield": 0.01,
+    "observed_price": 9.826297782739111,
+    "solver_config": {"method": "AUTO"}
+  }'
+```
+
 API allocation limits come from environment variables and do not constrain direct library use:
 
 ```text
 MAX_API_SIMULATIONS=5000000
 MAX_CONVERGENCE_POINTS=20
 MAX_SENSITIVITY_POINTS=100
+MAX_IV_BATCH_SIZE=500
+MAX_SMILE_POINTS=200
 LOG_LEVEL=INFO
 ```
 
@@ -387,6 +469,8 @@ pytest by project configuration.
 - Normal-approximation confidence intervals
 - Greeks use raw model units and the calendar-time Theta convention
 - Pathwise differentiation is limited to Delta and Vega
+- Implied volatility assumes a European Black-Scholes-Merton inverse with finite configured bounds
+- Synthetic smiles are independent strike points without interpolation or cross-maturity structure
 
 At `T = 0`, both engines return intrinsic value. At `sigma = 0`, both use the discounted
 deterministic risk-neutral terminal payoff. Derived values outside finite floating-point range raise
@@ -394,9 +478,10 @@ a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
-Future phases can add full paths, additional variance-reduction techniques, implied volatility,
-market option chains, binomial trees, American exercise and Longstaff-Schwartz, Asian and barrier
-payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime switching,
-portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an interactive
-dashboard. Those features are architectural consumers of the existing contract, process, payoff,
-pricing, RNG, cluster, Greek, and result boundaries; none are implemented here.
+Future phases can add full paths, additional variance-reduction techniques, market option chains,
+volatility-surface construction, binomial trees, American exercise and Longstaff-Schwartz, Asian
+and barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
+switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
+interactive dashboard. Those features are architectural consumers of the existing contract,
+process, payoff, pricing, RNG, cluster, Greek, volatility, and result boundaries; none are
+implemented here.

@@ -8,7 +8,12 @@ from backend.app.models.greeks import (
     GreekMethod,
     SensitivityParameter,
 )
+from backend.app.models.option import OptionType
 from backend.app.models.simulation import VarianceReduction
+from backend.app.models.volatility import (
+    ImpliedVolatilityMethod,
+    ImpliedVolatilityStatus,
+)
 
 
 class ResultModel(BaseModel):
@@ -220,3 +225,86 @@ class SensitivityResult(ResultModel):
     varied_parameter: SensitivityParameter
     base_value: float
     points: list[SensitivityPoint]
+
+
+class ImpliedVolatilityResult(ResultModel):
+    """One Black-Scholes price inversion with convergence diagnostics."""
+
+    implied_volatility: float | None = Field(default=None, ge=0.0)
+    method_requested: ImpliedVolatilityMethod
+    method_used: ImpliedVolatilityMethod | None
+    converged: bool
+    iterations: int = Field(ge=0)
+    function_evaluations: int = Field(ge=0)
+    final_price: float | None = Field(default=None, ge=0.0)
+    target_price: float = Field(ge=0.0)
+    absolute_price_error: float | None = Field(default=None, ge=0.0)
+    price_lower_bound: float = Field(ge=0.0)
+    price_upper_bound: float = Field(ge=0.0)
+    volatility_lower_bound: float = Field(ge=0.0)
+    volatility_upper_bound: float = Field(gt=0.0)
+    runtime_ms: float = Field(ge=0.0)
+    initial_guess: float = Field(ge=0.0)
+    fallback_used: bool
+    final_vega: float | None = Field(default=None, ge=0.0)
+    price_to_vol_sensitivity: float | None = Field(default=None, ge=0.0)
+    status: ImpliedVolatilityStatus
+    message: str
+
+
+class ImpliedVolatilityBatchItemResult(ResultModel):
+    """One ordered batch outcome, including an explicit partial failure."""
+
+    index: int = Field(ge=0)
+    success: bool
+    result: ImpliedVolatilityResult | None = None
+    status: ImpliedVolatilityStatus
+    message: str
+
+
+class ImpliedVolatilityBatchResult(ResultModel):
+    """Ordered batch results with transparent success and failure counts."""
+
+    items: list[ImpliedVolatilityBatchItemResult]
+    total_count: int = Field(ge=0)
+    success_count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+
+
+class VolatilitySmilePoint(ResultModel):
+    """One synthetic smile observation using forward log-moneyness."""
+
+    strike: float = Field(gt=0.0)
+    moneyness: float = Field(gt=0.0)
+    log_moneyness: float
+    option_price: float = Field(ge=0.0)
+    implied_volatility: float | None = Field(default=None, ge=0.0)
+    status: ImpliedVolatilityStatus
+    message: str
+
+
+class VolatilitySmileResult(ResultModel):
+    """An ordered synthetic single-maturity implied-volatility slice."""
+
+    spot: float = Field(gt=0.0)
+    maturity_years: float = Field(ge=0.0)
+    forward_price: float = Field(gt=0.0)
+    option_type: OptionType
+    points: list[VolatilitySmilePoint]
+
+
+class SolverComparisonPoint(ResultModel):
+    """One explicit solver's outcome in a common observation comparison."""
+
+    method: ImpliedVolatilityMethod
+    success: bool
+    result: ImpliedVolatilityResult | None = None
+    status: ImpliedVolatilityStatus
+    message: str
+
+
+class ImpliedVolatilitySolverComparisonResult(ResultModel):
+    """Brent, bisection, and Newton outcomes for the same observed price."""
+
+    target_price: float = Field(ge=0.0)
+    points: list[SolverComparisonPoint]
