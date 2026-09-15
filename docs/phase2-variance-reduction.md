@@ -309,3 +309,7 @@ execution, path-dependent controls, Greeks, new payoffs, or new stochastic proce
 method must define its dependence structure and uncertainty estimator before joining the existing
 configuration and comparison interfaces. Those additions do not require replacing the Phase 1
 contract, market, process, payoff, pricing, or RNG foundations.
+
+Phase 3 builds Common-Random-Number finite differences and pathwise sensitivities on these same
+independent estimator clusters. Its formulas and boundary conventions are documented in
+[phase3-greeks.md](phase3-greeks.md).

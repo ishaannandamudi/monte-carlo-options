@@ -48,26 +48,77 @@ class GBMProcess(StochasticProcess):
                 )
             return np.full(count, deterministic_terminal, dtype=np.float64)
 
-        if config.variance_reduction.uses_antithetic:
-            normals = self._antithetic_normals(count, rng)
-        else:
-            normals = np.asarray(rng.standard_normal(count), dtype=np.float64)
-
-        log_returns = drift + volatility * math.sqrt(maturity) * normals
-        terminal = contract.spot * finite_array_exp(log_returns, context="GBM terminal prices")
-        require_finite(terminal, context="GBM terminal prices")
-        return terminal
+        normals = standard_normal_drivers(
+            count,
+            rng,
+            antithetic=config.variance_reduction.uses_antithetic,
+        )
+        return terminal_prices_from_normals(contract, market, normals)
 
     @staticmethod
     def _antithetic_normals(count: int, rng: Generator) -> NDArray[np.float64]:
-        pair_count, remainder = divmod(count, 2)
-        primary = np.asarray(rng.standard_normal(pair_count + remainder), dtype=np.float64)
-        normals = np.empty(count, dtype=np.float64)
-        normals[0 : 2 * pair_count : 2] = primary[:pair_count]
-        normals[1 : 2 * pair_count : 2] = -primary[:pair_count]
-        if remainder:
-            normals[-1] = primary[-1]
-        return normals
+        return standard_normal_drivers(count, rng, antithetic=True)
+
+
+def standard_normal_drivers(
+    count: int,
+    rng: Generator,
+    *,
+    antithetic: bool,
+) -> NDArray[np.float64]:
+    """Generate explicit reusable normal drivers with the Phase 1 pairing policy."""
+
+    if count <= 0:
+        raise ValueError("normal driver count must be positive")
+    if not antithetic:
+        return np.asarray(rng.standard_normal(count), dtype=np.float64)
+
+    pair_count, remainder = divmod(count, 2)
+    primary = np.asarray(rng.standard_normal(pair_count + remainder), dtype=np.float64)
+    normals = np.empty(count, dtype=np.float64)
+    normals[0 : 2 * pair_count : 2] = primary[:pair_count]
+    normals[1 : 2 * pair_count : 2] = -primary[:pair_count]
+    if remainder:
+        normals[-1] = primary[-1]
+    return normals
+
+
+def terminal_prices_from_normals(
+    contract: OptionContract,
+    market: MarketEnvironment,
+    normals: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Evaluate terminal GBM values from caller-owned standard-normal drivers."""
+
+    drivers = np.asarray(normals, dtype=np.float64)
+    if drivers.ndim != 1 or drivers.size == 0:
+        raise ValueError("normal drivers must be a non-empty one-dimensional array")
+    require_finite(drivers, context="GBM normal drivers")
+
+    maturity = contract.maturity_years
+    if maturity == 0.0:
+        return np.full(drivers.size, contract.spot, dtype=np.float64)
+
+    volatility = market.volatility
+    drift = (market.risk_free_rate - market.dividend_yield - 0.5 * volatility**2) * maturity
+    if volatility == 0.0:
+        growth = finite_exp(drift, context="deterministic GBM growth factor")
+        terminal = contract.spot * growth
+        if not math.isfinite(terminal) or terminal <= 0.0:
+            from backend.app.core.exceptions import NumericalError
+
+            raise NumericalError(
+                "deterministic GBM terminal price is outside positive finite range"
+            )
+        return np.full(drivers.size, terminal, dtype=np.float64)
+
+    log_returns = drift + volatility * math.sqrt(maturity) * drivers
+    terminal_values = contract.spot * finite_array_exp(
+        log_returns,
+        context="GBM terminal prices",
+    )
+    require_finite(terminal_values, context="GBM terminal prices")
+    return terminal_values
 
 
 def theoretical_terminal_mean(

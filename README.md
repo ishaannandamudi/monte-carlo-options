@@ -3,7 +3,7 @@
 Monte Carlo Options is the quantitative foundation for a long-term derivatives-research platform.
 The current implementation prices European calls and puts under constant-market risk-neutral
 geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
-uncertainty diagnostics, and advanced variance reduction.
+uncertainty diagnostics, advanced variance reduction, and first-class Greeks.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -22,12 +22,16 @@ currency-safe decimal amounts.
 - Monte Carlo versus analytical error, z-score, and interval-containment diagnostics
 - Independently seeded, reproducible convergence experiments and empirical standard-error slopes
 - Fixed-budget comparisons across all four variance-reduction modes
+- Analytical Delta, Gamma, Vega, calendar-time Theta, Rho, and dividend Rho
+- Common-Random-Number finite-difference Greeks with direct estimator uncertainty
+- Pathwise Delta and Vega with plain or antithetic sampling
+- Analytical-versus-stochastic Greek comparisons and one-dimensional sensitivity grids
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes Greeks, implied volatility, market data, path-dependent or
-American options, trees, calibration, stochastic volatility, jumps, multi-asset models, portfolio
-risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
+The current scope deliberately excludes implied volatility, market data, path-dependent or American
+options, trees, calibration, stochastic volatility, jumps, multi-asset models, portfolio risk,
+parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
 
@@ -92,6 +96,60 @@ antithetic clusters before beta is estimated or adjustment and SE are calculated
 the singleton's one-path weight. See the explicit derivation in
 [docs/phase2-variance-reduction.md](docs/phase2-variance-reduction.md).
 
+## Greeks and unit conventions
+
+For value `V(S, sigma, r, q, T)`, the library reports:
+
+- Delta: `dV/dS`
+- Gamma: `d²V/dS²`
+- Vega: `dV/dsigma`
+- Rho: `dV/dr`
+- Dividend Rho: `dV/dq`
+- Theta: `-dV/dT`, the change in value as calendar time passes
+
+Values use raw model units. Vega is per absolute volatility unit `1.00`; rate sensitivities are per
+absolute rate unit `1.00`; Theta is per year. The library does not silently scale Vega to one
+percentage point or Rho to basis points.
+
+Black-Scholes-Merton provides closed-form values for all six Greeks. Exact expiry uses an explicit
+finite convention: call/put Delta at the strike is `0.5`/`-0.5`, while Gamma, Vega, Theta, Rho, and
+dividend Rho are zero. Zero volatility differentiates the active deterministic discounted-payoff
+branch; at the deterministic forward kink it uses half-weight branch derivatives and the right-hand
+Vega limit. See [docs/phase3-greeks.md](docs/phase3-greeks.md) for every formula and boundary rule.
+
+## Monte Carlo Greeks
+
+Finite differences support Delta, Gamma, Vega, Theta, Rho, and dividend Rho under every existing
+variance-reduction mode. Spot uses a relative bump; all other bumps use raw absolute model units.
+Central differences are used when both states are valid. Vega near zero volatility and Theta near
+expiry use a forward fallback so no invalid state is constructed.
+
+The engine explicitly generates one PCG64 standard-normal driver vector and reuses it for the base,
+upward, and downward valuations. These Common Random Numbers (CRN) make each per-driver Greek
+observation a difference under the same shock. Standard errors come directly from those difference
+observations, including antithetic pair clusters and an odd singleton. They are not formed by
+treating bumped prices as independent.
+
+Control-variate finite differences recompute the correct discounted-stock expectation for every
+bumped state before combining its adjusted observations. The default bumps are:
+
+```text
+spot_relative_bump             = 1e-3
+volatility_absolute_bump       = 1e-4
+rate_absolute_bump             = 1e-4
+dividend_yield_absolute_bump   = 1e-4
+maturity_absolute_bump         = 1/3650 years
+```
+
+Large bumps have more truncation error; very small bumps can suffer cancellation and simulation
+noise. Smaller is not universally better, so research callers should inspect bump stability.
+
+Pathwise estimators are implemented for Delta and Vega. They differentiate terminal GBM and use
+strict ITM indicators at the payoff kink. Pathwise sampling supports `NONE` and `ANTITHETIC`, with
+SE calculated from independent paths or pair clusters. Pathwise Gamma is intentionally absent
+because naively differentiating the payoff indicator does not produce a valid second-derivative
+estimator.
+
 ## Reproducibility and convergence
 
 Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
@@ -121,13 +179,13 @@ efficiency is its reciprocal. Runtime is reported separately and is not mixed in
 
 ```text
 backend/app/
-├── analytics/     # statistics, convergence, and method comparisons
+├── analytics/     # convergence, estimator comparisons, and sensitivity grids
 ├── api/           # FastAPI request models, limits, and thin adapters
 ├── core/          # environment settings, logging, errors, numerical guards
-├── models/        # contracts, market/config enums, typed result models
+├── models/        # contracts, Greek/config enums, and typed result models
 ├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
-├── pricing/       # pricers, comparisons, and estimator transformations
-└── simulation/    # process abstraction, GBM, PCG64/SeedSequence ownership
+├── pricing/       # prices, Greeks, comparisons, and estimator transformations
+└── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # reserved for opt-in quantitative benchmarks
 docs/              # architecture and numerical methodology
@@ -175,6 +233,22 @@ simulation = SimulationConfig(
 
 comparison = compare_prices(contract, market, simulation)
 print(comparison.model_dump())
+```
+
+Analytical and pathwise Greeks:
+
+```python
+from backend.app.models.greeks import Greek
+from backend.app.pricing.black_scholes_greeks import black_scholes_greeks
+from backend.app.pricing.monte_carlo_greeks import pathwise_greeks
+
+analytical = black_scholes_greeks(contract, market)
+pathwise = pathwise_greeks(
+    contract,
+    market,
+    simulation.model_copy(update={"variance_reduction": VarianceReduction.ANTITHETIC}),
+    [Greek.DELTA, Greek.VEGA],
+)
 ```
 
 `batch_size` is validated as an optional execution hint. The current engine evaluates a single
@@ -230,6 +304,10 @@ Available endpoints:
 - `POST /api/pricing/compare`
 - `POST /api/analytics/convergence`
 - `POST /api/analytics/variance-reduction`
+- `POST /api/greeks/black-scholes`
+- `POST /api/greeks/monte-carlo`
+- `POST /api/analytics/greeks/compare`
+- `POST /api/analytics/sensitivity`
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -252,11 +330,25 @@ curl -X POST http://127.0.0.1:8000/api/analytics/variance-reduction \
   }'
 ```
 
+Request CRN finite-difference Greeks by sending the same contract, market, and simulation objects
+to `/api/greeks/monte-carlo`, together with:
+
+```json
+{
+  "greeks": ["DELTA", "GAMMA", "VEGA", "THETA", "RHO", "DIVIDEND_RHO"],
+  "estimator_method": "FINITE_DIFFERENCE"
+}
+```
+
+The optional `bump_config` object overrides individual bump defaults. `PATHWISE` accepts Delta and
+Vega with `NONE` or `ANTITHETIC` variance reduction. Unsupported combinations return HTTP 422.
+
 API allocation limits come from environment variables and do not constrain direct library use:
 
 ```text
 MAX_API_SIMULATIONS=5000000
 MAX_CONVERGENCE_POINTS=20
+MAX_SENSITIVITY_POINTS=100
 LOG_LEVEL=INFO
 ```
 
@@ -276,9 +368,10 @@ zero uncertainty; deterministic cases remain exact.
 ```
 
 The normal suite uses fixed seeds, moderate sample sizes, analytical identities, deterministic edge
-cases, theoretical GBM moments, direct pair/control calculations, and statistically scaled Monte
-Carlo tolerances such as `abs(MC - BS) <= k * SE`. Resource-intensive checks belong under the
-`performance` marker and are excluded from ordinary pytest by project configuration.
+cases, theoretical GBM moments, direct pair/control/CRN calculations, analytical Greek identities,
+and statistically scaled Monte Carlo tolerances such as `abs(estimate - benchmark) <= k * SE`.
+Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
+pytest by project configuration.
 
 ## Model assumptions and limitations
 
@@ -292,6 +385,8 @@ Carlo tolerances such as `abs(MC - BS) <= k * SE`. Resource-intensive checks bel
 - No transaction costs, liquidity effects, discrete hedging, or model calibration
 - Terminal-only simulation; no path-dependent state
 - Normal-approximation confidence intervals
+- Greeks use raw model units and the calendar-time Theta convention
+- Pathwise differentiation is limited to Delta and Vega
 
 At `T = 0`, both engines return intrinsic value. At `sigma = 0`, both use the discounted
 deterministic risk-neutral terminal payoff. Derived values outside finite floating-point range raise
@@ -299,10 +394,9 @@ a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
-Future phases can add full paths, additional variance-reduction techniques, Greeks, implied
-volatility,
+Future phases can add full paths, additional variance-reduction techniques, implied volatility,
 market option chains, binomial trees, American exercise and Longstaff-Schwartz, Asian and barrier
 payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime switching,
-portfolio Greeks and risk, performance work, quasi-Monte Carlo, and eventually an interactive
+portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an interactive
 dashboard. Those features are architectural consumers of the existing contract, process, payoff,
-pricing, RNG, cluster, and result boundaries; none are implemented here.
+pricing, RNG, cluster, Greek, and result boundaries; none are implemented here.

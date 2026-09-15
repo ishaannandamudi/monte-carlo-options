@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.core.config import Settings
+from backend.app.models.greeks import GreekBumpConfig
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract, OptionType
 from backend.app.models.simulation import SimulationConfig
@@ -105,15 +106,19 @@ def test_settings_limits_are_positive() -> None:
         Settings(max_api_simulations=0)
     with pytest.raises(ValidationError):
         Settings(max_convergence_points=0)
+    with pytest.raises(ValidationError):
+        Settings(max_sensitivity_points=0)
 
 
 def test_settings_load_environment_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAX_API_SIMULATIONS", "1234")
     monkeypatch.setenv("MAX_CONVERGENCE_POINTS", "7")
+    monkeypatch.setenv("MAX_SENSITIVITY_POINTS", "12")
     monkeypatch.setenv("LOG_LEVEL", "debug")
     settings = Settings.from_environment()
     assert settings.max_api_simulations == 1_234
     assert settings.max_convergence_points == 7
+    assert settings.max_sensitivity_points == 12
     assert settings.log_level == "DEBUG"
 
 
@@ -125,3 +130,19 @@ def test_contract_accepts_zero_maturity_and_float_values() -> None:
         maturity_years=0.0,
     )
     assert option.maturity_years == 0.0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("spot_relative_bump", 0.0),
+        ("spot_relative_bump", 1.0),
+        ("volatility_absolute_bump", 0.0),
+        ("rate_absolute_bump", -1e-4),
+        ("dividend_yield_absolute_bump", math.inf),
+        ("maturity_absolute_bump", math.nan),
+    ],
+)
+def test_greek_bump_config_rejects_invalid_values(field: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        GreekBumpConfig.model_validate({field: value})

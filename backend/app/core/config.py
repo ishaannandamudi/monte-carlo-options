@@ -14,6 +14,7 @@ class Settings(BaseModel):
 
     max_api_simulations: int = Field(default=5_000_000, gt=0)
     max_convergence_points: int = Field(default=20, gt=0)
+    max_sensitivity_points: int = Field(default=100, gt=0)
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
 
     @classmethod
@@ -25,6 +26,8 @@ class Settings(BaseModel):
             values["max_api_simulations"] = value
         if value := os.getenv("MAX_CONVERGENCE_POINTS"):
             values["max_convergence_points"] = value
+        if value := os.getenv("MAX_SENSITIVITY_POINTS"):
+            values["max_sensitivity_points"] = value
         if value := os.getenv("LOG_LEVEL"):
             values["log_level"] = value.upper()
         return cls.model_validate(values)

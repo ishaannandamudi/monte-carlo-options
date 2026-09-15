@@ -2,6 +2,12 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.app.models.greeks import (
+    DifferenceScheme,
+    Greek,
+    GreekMethod,
+    SensitivityParameter,
+)
 from backend.app.models.simulation import VarianceReduction
 
 
@@ -110,3 +116,107 @@ class VarianceReductionComparisonResult(ResultModel):
     root_seed: int = Field(ge=0)
     confidence_level: float = Field(gt=0.0, lt=1.0)
     points: list[VarianceReductionComparisonPoint]
+
+
+class AnalyticalGreeksResult(ResultModel):
+    """Black-Scholes-Merton price and raw-unit analytical sensitivities."""
+
+    option_price: float = Field(ge=0.0)
+    delta: float
+    gamma: float = Field(ge=0.0)
+    vega: float = Field(ge=0.0)
+    theta: float
+    rho: float
+    dividend_rho: float
+    d1: float | None = None
+    d2: float | None = None
+
+
+class FiniteDifferenceGreekResult(ResultModel):
+    """One CRN bump-and-revalue Greek with direct estimator uncertainty."""
+
+    greek: Greek
+    estimate: float
+    method: GreekMethod = GreekMethod.FINITE_DIFFERENCE
+    difference_scheme: DifferenceScheme
+    bump_size: float = Field(gt=0.0)
+    base_price: float
+    upward_price: float
+    downward_price: float | None
+    standard_error: float = Field(ge=0.0)
+    estimator_variance: float = Field(ge=0.0)
+    confidence_interval_low: float
+    confidence_interval_high: float
+    confidence_level: float = Field(gt=0.0, lt=1.0)
+    num_simulations: int = Field(gt=0)
+    seed: int = Field(ge=0)
+    variance_reduction: VarianceReduction
+    runtime_ms: float = Field(ge=0.0)
+
+
+class PathwiseGreekResult(ResultModel):
+    """One pathwise terminal-GBM Greek and cluster-aware uncertainty."""
+
+    greek: Greek
+    estimate: float
+    method: GreekMethod = GreekMethod.PATHWISE
+    standard_error: float = Field(ge=0.0)
+    estimator_variance: float = Field(ge=0.0)
+    confidence_interval_low: float
+    confidence_interval_high: float
+    confidence_level: float = Field(gt=0.0, lt=1.0)
+    num_simulations: int = Field(gt=0)
+    seed: int = Field(ge=0)
+    variance_reduction: VarianceReduction
+    runtime_ms: float = Field(ge=0.0)
+
+
+class MonteCarloGreeksResult(ResultModel):
+    """Requested Monte Carlo Greek estimates from one estimator method."""
+
+    method: GreekMethod
+    results: list[FiniteDifferenceGreekResult | PathwiseGreekResult]
+
+
+class GreekComparisonEstimate(ResultModel):
+    """One stochastic Greek estimate measured against Black-Scholes."""
+
+    method: GreekMethod
+    estimate: float
+    analytical_benchmark: float
+    absolute_error: float = Field(ge=0.0)
+    relative_error: float | None
+    standard_error: float = Field(ge=0.0)
+    z_score: float | None
+    confidence_interval_low: float
+    confidence_interval_high: float
+    runtime_ms: float = Field(ge=0.0)
+
+
+class GreekComparisonResult(ResultModel):
+    """Available stochastic estimators for one Greek and its exact benchmark."""
+
+    greek: Greek
+    analytical_benchmark: float
+    estimates: list[GreekComparisonEstimate]
+
+
+class SensitivityPoint(ResultModel):
+    """Price and analytical Greeks at one parameter-grid value."""
+
+    parameter_value: float
+    black_scholes_price: float = Field(ge=0.0)
+    delta: float
+    gamma: float = Field(ge=0.0)
+    vega: float = Field(ge=0.0)
+    theta: float
+    rho: float
+    dividend_rho: float
+
+
+class SensitivityResult(ResultModel):
+    """One-dimensional analytical price and Greek grid."""
+
+    varied_parameter: SensitivityParameter
+    base_value: float
+    points: list[SensitivityPoint]

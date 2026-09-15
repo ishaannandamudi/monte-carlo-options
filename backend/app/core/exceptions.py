@@ -11,3 +11,11 @@ class NumericalError(QuantitativeError):
 
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
+
+
+class UnsupportedGreekMethodError(QuantitativeError):
+    """Raised when a Greek is unavailable for the requested estimator configuration."""
+
+
+class SensitivityGridError(QuantitativeError):
+    """Raised when a sensitivity grid contains an invalid model value."""
