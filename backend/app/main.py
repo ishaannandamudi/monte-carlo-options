@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 from backend.app.api.analytics import router as analytics_router
 from backend.app.api.asian import analytics_router as asian_analytics_router
 from backend.app.api.asian import pricing_router as asian_pricing_router
+from backend.app.api.barrier import analytics_router as barrier_analytics_router
+from backend.app.api.barrier import pricing_router as barrier_pricing_router
 from backend.app.api.binomial import analytics_router as binomial_analytics_router
 from backend.app.api.binomial import pricing_router as binomial_pricing_router
 from backend.app.api.digital import analytics_router as digital_analytics_router
@@ -47,10 +49,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.10.0",
+    version="0.11.0",
     description=(
-        "European, American, Asian, and digital option research with analytical and "
-        "Monte Carlo pricing"
+        "European, American, Asian, digital, and barrier option research with analytical "
+        "and Monte Carlo pricing"
     ),
     lifespan=lifespan,
 )
@@ -70,6 +72,8 @@ app.include_router(asian_pricing_router)
 app.include_router(asian_analytics_router)
 app.include_router(digital_pricing_router)
 app.include_router(digital_analytics_router)
+app.include_router(barrier_pricing_router)
+app.include_router(barrier_analytics_router)
 
 
 @app.exception_handler(ProviderError)

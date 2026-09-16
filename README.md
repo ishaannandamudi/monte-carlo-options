@@ -10,7 +10,9 @@ engine prices European and American contracts, extracts early-exercise boundarie
 native tree Greeks. Longstaff-Schwartz Monte Carlo adds full-path GBM, learned American exercise
 policies, and independent policy valuation against the CRR benchmark. Phase 10 adds discretely
 monitored arithmetic and geometric Asian options, an exact geometric-Asian benchmark and control
-variate, plus analytical and Monte Carlo cash-or-nothing and asset-or-nothing digitals.
+variate, plus analytical and Monte Carlo cash-or-nothing and asset-or-nothing digitals. Phase 11
+adds single-barrier calls and puts with discrete monitoring, Brownian-bridge continuous correction,
+rebates, hit diagnostics, continuous analytical benchmarks, and knock-in/out parity analytics.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -65,11 +67,19 @@ currency-safe decimal amounts.
 - Cash-or-nothing and asset-or-nothing digital calls and puts
 - Analytical and terminal-GBM Monte Carlo digital pricing with strict ITM equality
 - Asian method comparisons, monitoring-frequency studies, and exotic convergence experiments
+- Down/up and knock-in/knock-out European barrier calls and puts
+- Inclusive time-zero and scheduled barrier detection with first observed hit times
+- Discrete `AT_HIT` and `AT_EXPIRY` rebates plus bridge-compatible expiry rebates
+- Exact log-GBM Brownian-bridge crossing probabilities on irregular intervals
+- Continuous survival-probability weighting without extra Bernoulli noise
+- All eight zero-rebate continuously monitored single-barrier analytical formulas
+- Pathwise discrete/bridge knock-in plus knock-out parity diagnostics
+- Barrier path-count, monitoring-frequency, and level-sensitivity analytics
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes surface fitting/repair, barrier and other path-dependent
-payoffs beyond discrete Asians, non-CRR tree models, calibration, stochastic volatility,
+The current scope deliberately excludes surface fitting/repair, double/multi-asset barriers and
+path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, calibration, stochastic volatility,
 local volatility, jumps, multi-asset models, portfolio risk, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
@@ -487,6 +497,50 @@ derivations, edge-case and cluster-variance policies, memory model, and API safe
 research examples and opt-in timings are in
 [benchmarks/phase10-exotics.md](benchmarks/phase10-exotics.md).
 
+## Barrier options and monitoring correction
+
+A barrier contract has one `UP` or `DOWN` level and `IN` or `OUT` semantics. Down barriers hit when
+`S_t <= H`; up barriers hit when `S_t >= H`. Equality is a hit, and `S_0` is always checked even if
+the schedule begins later. A knock-in activates the maturity vanilla payoff after a hit. A
+knock-out retains that payoff only when no hit occurs.
+
+Discrete mode examines time zero plus regular or explicit scheduled observations. It records the
+first observed hit index and time, enabling a knock-out rebate paid either at that hit or at expiry.
+A knock-in rebate is a no-hit payment at expiry. The terminal stock is simulated for payoff even
+when an explicit barrier schedule omits maturity; it is treated as a discrete barrier observation
+only when scheduled.
+
+Discrete sampling can miss a crossing followed by a return between observations. For GBM, bridge
+mode corrects this with the exact conditional log-price crossing probability. For a down barrier
+with both interval endpoints above `h=log(H)`,
+
+```text
+p_cross = exp[-2 (X_i-h)(X_{i+1}-h)/(sigma^2 delta_i)].
+```
+
+The up formula reflects the distances below `h`. Endpoint breaches have probability one. Actual
+irregular time increments are used. Interval survivals multiply to `w`; an OUT payoff is weighted
+by `w`, and an IN payoff by `1-w`. This conditional expectation avoids extra Bernoulli draws and
+makes zero-rebate IN plus OUT equal vanilla path by path. Bridge hit probability is
+`1-mean(w)`. Bridge hit-time statistics are unavailable because no first-hit time is sampled.
+
+Expiry rebates are conditionally weighted in bridge mode. Positive `AT_HIT` bridge rebates are
+rejected: survival probability alone cannot supply the required expected hit-time discount. At
+`sigma=0`, the path is monotone and any continuous crossing time is solved exactly. At `T=0`, only
+the inclusive initial status and immediate payoff/rebate semantics apply.
+
+All eight zero-rebate continuous single-barrier Black-Scholes-Merton combinations are implemented.
+Reflection terms use log-normal CDF evaluation for far-barrier stability. Analytical and same-path
+Monte Carlo checks enforce `knock-in + knock-out = vanilla`. Research endpoints compare discrete,
+bridge, and analytical values; vary paths or monitoring count with independent child seeds; and
+vary barrier level with Common Random Numbers.
+
+Only requested states plus maturity are retained, so state memory is O(paths x observations).
+Bridge survival uses O(paths) extra workspace. See
+[docs/phase11-barrier-options.md](docs/phase11-barrier-options.md) for formulas, rebate restrictions,
+parity, deterministic policies, and API safeguards. Measurements are in
+[benchmarks/phase11-barriers.md](benchmarks/phase11-barriers.md).
+
 ## Reproducibility and convergence
 
 Every stochastic pricing call constructs an isolated `numpy.random.Generator` backed by `PCG64`.
@@ -622,6 +676,36 @@ digital = DigitalOptionContract(
 digital_result = digital_analytical_price(digital, market)
 ```
 
+Bridge-weighted down-and-out call:
+
+```python
+from backend.app.models.barrier import (
+    BarrierDirection,
+    BarrierMonitoringMode,
+    BarrierOptionContract,
+    BarrierSimulationConfig,
+    BarrierStyle,
+)
+from backend.app.pricing.barrier import barrier_monte_carlo_price
+
+barrier = BarrierOptionContract(
+    option_type=OptionType.CALL,
+    barrier_direction=BarrierDirection.DOWN,
+    barrier_style=BarrierStyle.OUT,
+    spot=100.0,
+    strike=100.0,
+    barrier=90.0,
+    maturity_years=1.0,
+    monitoring_schedule=MonitoringSchedule.regular(52),
+    monitoring_mode=BarrierMonitoringMode.BROWNIAN_BRIDGE,
+)
+barrier_result = barrier_monte_carlo_price(
+    barrier,
+    market,
+    BarrierSimulationConfig(num_simulations=100_000, seed=42),
+)
+```
+
 Analytical and pathwise Greeks:
 
 ```python
@@ -712,6 +796,8 @@ Available endpoints:
 - `POST /api/pricing/asian`
 - `POST /api/pricing/asian/geometric-analytical`
 - `POST /api/pricing/digital`
+- `POST /api/pricing/barrier`
+- `POST /api/pricing/barrier/analytical`
 - `POST /api/analytics/longstaff-schwartz/compare`
 - `POST /api/analytics/longstaff-schwartz/convergence`
 - `POST /api/analytics/longstaff-schwartz/basis-comparison`
@@ -744,6 +830,10 @@ Available endpoints:
 - `POST /api/analytics/asian/convergence`
 - `POST /api/analytics/digital/compare`
 - `POST /api/analytics/digital/convergence`
+- `POST /api/analytics/barrier/compare`
+- `POST /api/analytics/barrier/convergence`
+- `POST /api/analytics/barrier/parity`
+- `POST /api/analytics/barrier/sensitivity`
 
 Price an American put and return its same-tree European comparator and exercise summary:
 
@@ -831,6 +921,30 @@ Price a cash digital analytically by posting this body to `/api/pricing/digital`
 }
 ```
 
+Price a weekly monitored down-and-out call with continuous bridge correction:
+
+```json
+{
+  "contract": {
+    "option_type": "CALL", "barrier_direction": "DOWN", "barrier_style": "OUT",
+    "spot": 100.0, "strike": 100.0, "barrier": 90.0, "maturity_years": 1.0,
+    "monitoring_schedule": {"monitoring_count": 52},
+    "monitoring_mode": "BROWNIAN_BRIDGE",
+    "rebate": 0.0, "rebate_timing": "AT_EXPIRY"
+  },
+  "market": {"risk_free_rate": 0.05, "volatility": 0.2, "dividend_yield": 0.01},
+  "simulation": {
+    "num_simulations": 100000, "seed": 42,
+    "variance_reduction": "ANTITHETIC", "confidence_level": 0.95
+  }
+}
+```
+
+Post this body to `/api/pricing/barrier`. The analytical endpoint supports zero-rebate continuous
+monitoring. Barrier comparison returns discrete and bridge estimates; convergence accepts
+`PATH_COUNT` or `MONITORING_COUNT`; parity requires zero rebate; sensitivity accepts a positive
+unique `barrier_levels` list.
+
 The original European `/api/analytics/convergence` body replaces `simulation` with
 `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -904,6 +1018,9 @@ MAX_LSM_DIAGNOSTIC_DATES=100
 MAX_ASIAN_MONITORING_POINTS=1000
 MAX_ASIAN_TOTAL_PATH_NODES=25000000
 MAX_EXOTIC_CONVERGENCE_POINTS=20
+MAX_BARRIER_MONITORING_POINTS=5000
+MAX_BARRIER_TOTAL_PATH_NODES=25000000
+MAX_BARRIER_CONVERGENCE_POINTS=20
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -938,6 +1055,10 @@ every method or convergence point represented by the request. Oversized regular 
 before the service expands the schedule or allocates a path matrix. Digital Monte Carlo reuses the
 general path-count ceiling.
 
+Barrier limits count mandatory time zero, scheduled observations, a payoff-only maturity state when
+needed, and every pricing/parity run represented by an analytics request. The 25-million-node
+default admits 100k×52 and is close to 100k×252, while rejecting 100k×1000 before allocation.
+
 ## Tests and quality checks
 
 ```bash
@@ -962,6 +1083,11 @@ increments, discrete geometric moments, one-date vanilla reduction, analytical d
 direct pair/control calculations, deterministic edges, and statistically scaled analytical
 comparisons. Performance-marked cases cover 10k/100k Asian grids through 252 dates and 100k/1m
 digital paths.
+Phase 11 tests cover inclusive initial and scheduled hits, exact first-hit rebates, fixed-path
+IN/OUT parity, manual bridge probabilities, irregular intervals, continuous analytical references,
+deterministic crossing times, antithetic clusters, monitoring bias, resource limits, and every new
+HTTP endpoint. Barrier performance tests cover 10k×52, 100k×52, and 100k×252; 100k×1000 is gated
+behind an explicit environment opt-in because the state matrix alone is about 800.8 MB.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -999,6 +1125,11 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Arithmetic Asians have no analytical benchmark in this phase; geometric Asians use exact discrete moments
 - Digital strike equality pays zero under the strict ITM convention
 - Digital payoffs are discontinuous and can have relatively high Monte Carlo variance near strike
+- Single barriers use inclusive hits and always monitor the initial spot
+- Discrete barriers can miss between-date crossings; bridge mode corrects this only for constant-volatility GBM
+- Bridge survival weighting supports expiry rebates but rejects positive hit-time rebates
+- Continuous barrier formulas support zero rebate; bridge hit-time moments are unavailable
+- Barrier Greeks, double barriers, and stochastic-volatility bridge corrections are not implemented
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1011,18 +1142,20 @@ volatility. The CRR engine can separately price an explicitly supplied American 
 dividends, liquidity, transaction costs, and market microstructure are not modeled.
 
 At `T = 0`, vanilla and Asian contracts return intrinsic value from `S_0`; digitals apply their
-strict spot-versus-strike indicator. At `sigma = 0`, European terminal engines use the discounted
-deterministic terminal payoff, Asians use the deterministic monitored average, and the American CRR
-engine optimizes over its discrete deterministic exercise dates. Derived values outside finite
-floating-point range raise a quantitative domain error rather than returning NaN or infinity.
+strict spot-versus-strike indicator; barriers apply initial hit and IN/OUT rebate semantics. At
+`sigma = 0`, European terminal engines use the discounted deterministic terminal payoff, Asians use
+the deterministic monitored average, barriers evaluate scheduled or exact continuous crossings,
+and the American CRR engine optimizes over its discrete deterministic exercise dates. Derived values
+outside finite floating-point range raise a quantitative domain error rather than returning NaN or
+infinity.
 
 ## Roadmap
 
-Phase 11 can add barrier contracts and rebates, discrete monitoring semantics, and any chosen
-continuous-monitoring correction on the existing schedule and arbitrary-time GBM foundation.
-Later phases can add parametric surface fitting, quote-repair policy, additional
-variance-reduction techniques, richer stopping policies, correlated assets, Heston volatility and calibration, jump diffusion, regime
+Phase 12 can add correlated multi-asset simulation, basket payoffs, and related controls on the
+existing RNG, process, payoff, and estimator boundaries. Later phases can add parametric surface
+fitting, quote-repair policy, additional variance-reduction techniques, richer stopping policies,
+Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
 process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
-none are implemented in Phase 10.
+none are implemented in Phase 11.

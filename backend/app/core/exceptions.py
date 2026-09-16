@@ -17,6 +17,10 @@ class ExoticPricingError(QuantitativeError):
     """Raised for invalid Asian/digital pricing experiments or method combinations."""
 
 
+class BarrierPricingError(ExoticPricingError):
+    """Raised for unsupported or numerically invalid barrier pricing operations."""
+
+
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
 
