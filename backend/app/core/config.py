@@ -16,7 +16,10 @@ class Settings(BaseModel):
     max_convergence_points: int = Field(default=20, gt=0)
     max_sensitivity_points: int = Field(default=100, gt=0)
     max_iv_batch_size: int = Field(default=500, gt=0)
-    max_smile_points: int = Field(default=200, gt=0)
+    max_smile_points: int = Field(default=500, gt=0)
+    max_surface_smiles: int = Field(default=100, gt=0)
+    max_surface_query_points: int = Field(default=1_000, gt=0)
+    max_diagnostic_grid_points: int = Field(default=10_000, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -40,6 +43,12 @@ class Settings(BaseModel):
             values["max_iv_batch_size"] = value
         if value := os.getenv("MAX_SMILE_POINTS"):
             values["max_smile_points"] = value
+        if value := os.getenv("MAX_SURFACE_SMILES"):
+            values["max_surface_smiles"] = value
+        if value := os.getenv("MAX_SURFACE_QUERY_POINTS"):
+            values["max_surface_query_points"] = value
+        if value := os.getenv("MAX_DIAGNOSTIC_GRID_POINTS"):
+            values["max_diagnostic_grid_points"] = value
         if value := os.getenv("MAX_OPTION_CHAIN_CONTRACTS"):
             values["max_option_chain_contracts"] = value
         if value := os.getenv("MAX_QUOTE_AGE_SECONDS"):

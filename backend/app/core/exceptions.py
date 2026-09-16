@@ -45,6 +45,10 @@ class MarketDataValidationError(MarketDataError):
     """Raised when normalized market data cannot support requested analytics."""
 
 
+class VolatilitySurfaceError(QuantitativeError):
+    """Raised when a smile or surface cannot be constructed or queried safely."""
+
+
 class ProviderError(MarketDataError):
     """Base class for translated external-provider failures."""
 

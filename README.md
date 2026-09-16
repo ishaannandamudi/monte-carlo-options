@@ -4,8 +4,8 @@ Monte Carlo Options is the quantitative foundation for a long-term derivatives-r
 The current implementation prices European calls and puts under constant-market risk-neutral
 geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
 uncertainty diagnostics, advanced variance reduction, first-class Greeks, and robust implied-
-volatility inversion. It also normalizes real option-market snapshots for quote-quality, liquidity,
-implied-volatility, Greek, smile, and put-call-parity analysis.
+volatility inversion. It also normalizes real option-market snapshots and constructs queryable
+volatility smiles and surfaces with static-arbitrage diagnostics.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -34,11 +34,18 @@ currency-safe decimal amounts.
 - Provider-independent underlying, option-instrument, quote, and chain-snapshot models
 - Massive (formerly Polygon.io) option-chain normalization with fully offline tests
 - Structured quote-quality, staleness, spread, IV, Greek, smile, and parity diagnostics
+- Canonical strike, spot-moneyness, forward-moneyness, and `log(K/F)` volatility points
+- LINEAR and PCHIP smile interpolation in total implied variance
+- Multi-expiration surface queries with total-variance maturity interpolation
+- Explicit wing and maturity extrapolation policies, defaulting to no extrapolation
+- OTM market quote selection, deterministic ATM/duplicate handling, and exclusion diagnostics
+- Strike-monotonicity, irregular-grid butterfly, and calendar-total-variance diagnostics
+- ATM-forward term structures and coordinate-based local skew and curvature metrics
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes volatility-surface interpolation, quote repair, American
-option pricing, path-dependent options, trees, calibration, stochastic volatility, jumps,
+The current scope deliberately excludes surface fitting/repair, American option pricing,
+path-dependent options, trees, calibration, stochastic volatility, local volatility, jumps,
 multi-asset models, portfolio risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
@@ -275,6 +282,40 @@ and flags residuals outside configurable absolute plus relative tolerance. It ne
 See [docs/phase5-market-data.md](docs/phase5-market-data.md) for the complete field mapping and
 policy reference.
 
+## Volatility smiles and surfaces
+
+Phase 6 normalizes every accepted IV point in four coordinates: strike `K`, spot moneyness `K/S`,
+forward moneyness `K/F`, and canonical log-forward-moneyness `k = log(K/F)`, with
+`F(T) = S exp((r-q)T)`. The surface continues the current flat continuously compounded rate and
+flat continuous-dividend assumptions; it does not introduce yield curves.
+
+Smile and maturity interpolation use total implied variance:
+
+```text
+w(k,T) = sigma(k,T)^2 T
+```
+
+Across strike, callers choose piecewise `LINEAR` or shape-preserving `PCHIP` interpolation in
+`(k,w)`. Across maturity, neighboring smile variances are linearly interpolated at fixed `k`, then
+converted back with `sigma = sqrt(w/T)`. Exact observations return their stored IV directly. Wing
+and maturity extrapolation are disabled by default; explicit `FLAT_VOL` is available when the
+caller accepts that assumption.
+
+Market construction uses fresh, arbitrage-valid IV observations within configured IV and relative-
+spread bounds. The default `OTM_ONLY` policy uses puts below the forward and calls above it. At the
+forward it chooses the tighter relative spread, then calls on a tie. Duplicate strikes use spread,
+freshness, and provider symbol as deterministic tie-breakers. Insufficient expirations are reported
+and omitted instead of receiving fabricated points.
+
+Diagnostics reconstruct European option prices to check strike monotonicity and convexity. On
+irregular strikes, convexity compares adjacent price slopes. Calendar checks require total variance
+to be nondecreasing across maturity at fixed `k`. These checks return structured issues and never
+repair a surface. ATM-forward term structure returns IV and total variance at `k=0`; local skew and
+curvature are centered finite differences with respect to `k`, not delta-based market quotes.
+
+See [docs/phase6-volatility-surfaces.md](docs/phase6-volatility-surfaces.md) for construction rules,
+query algorithms, equations, diagnostic tolerances, testing strategy, and limitations.
+
 ## Reproducibility and convergence
 
 Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
@@ -311,7 +352,8 @@ backend/app/
 ├── models/        # contracts, Greek/volatility configs, enums, and typed results
 ├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
 ├── pricing/       # prices, Greeks, IV inversion, comparisons, and transformations
-└── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
+├── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
+└── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # reserved for opt-in quantitative benchmarks
 docs/              # architecture and numerical methodology
@@ -462,6 +504,12 @@ Available endpoints:
 - `POST /api/analytics/options/chain`
 - `POST /api/analytics/options/smile`
 - `POST /api/analytics/options/put-call-parity`
+- `POST /api/analytics/volatility/smile/build`
+- `POST /api/analytics/volatility/smile/query`
+- `POST /api/analytics/volatility/surface/build`
+- `POST /api/analytics/volatility/surface/query`
+- `POST /api/analytics/volatility/surface/diagnostics`
+- `POST /api/analytics/volatility/surface/atm-term-structure`
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -521,7 +569,10 @@ MAX_API_SIMULATIONS=5000000
 MAX_CONVERGENCE_POINTS=20
 MAX_SENSITIVITY_POINTS=100
 MAX_IV_BATCH_SIZE=500
-MAX_SMILE_POINTS=200
+MAX_SMILE_POINTS=500
+MAX_SURFACE_SMILES=100
+MAX_SURFACE_QUERY_POINTS=1000
+MAX_DIAGNOSTIC_GRID_POINTS=10000
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -579,10 +630,13 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Greeks use raw model units and the calendar-time Theta convention
 - Pathwise differentiation is limited to Delta and Vega
 - Implied volatility assumes a European Black-Scholes-Merton inverse with finite configured bounds
-- Synthetic smiles are independent strike points without interpolation or cross-maturity structure
+- Surface smiles use total-variance interpolation without parametric fitting or repair
 - Market bid/ask quotes may be missing, crossed, delayed, or stale; last trades may be older still
 - Midpoint is a research input and does not represent a guaranteed executable price
 - Chain analytics use an explicit flat interest rate and flat continuous dividend yield
+- Surface log-moneyness uses the maturity-specific forward under those flat carry assumptions
+- Default surface queries do not extrapolate beyond observed strike or maturity support
+- Local skew and curvature are derivatives with respect to log-forward-moneyness
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
 - No settlement, exercise, or instrument taxonomy beyond reported provider metadata is inferred
 
@@ -598,7 +652,7 @@ a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
-Future phases can add volatility-surface construction, quote-repair policy, full paths, additional
+Future phases can add parametric surface fitting, quote-repair policy, full paths, additional
 variance-reduction techniques, binomial trees, American exercise and Longstaff-Schwartz, Asian and
 barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an

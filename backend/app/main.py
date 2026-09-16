@@ -14,6 +14,7 @@ from backend.app.api.options_analytics import router as options_analytics_router
 from backend.app.api.pricing import router as pricing_router
 from backend.app.api.volatility import analytics_router as volatility_analytics_router
 from backend.app.api.volatility import router as volatility_router
+from backend.app.api.volatility_surface import router as volatility_surface_router
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import (
     ProviderAuthenticationError,
@@ -38,8 +39,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.5.0",
-    description="European option research, implied volatility, and normalized market-data API",
+    version="0.6.0",
+    description="European option research, market data, and volatility-surface API",
     lifespan=lifespan,
 )
 app.include_router(pricing_router)
@@ -49,6 +50,7 @@ app.include_router(volatility_router)
 app.include_router(volatility_analytics_router)
 app.include_router(market_data_router)
 app.include_router(options_analytics_router)
+app.include_router(volatility_surface_router)
 
 
 @app.exception_handler(ProviderError)
