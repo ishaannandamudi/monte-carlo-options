@@ -10,7 +10,7 @@ from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract, OptionType
 from backend.app.models.results import BlackScholesResult
 from backend.app.payoffs.vanilla import intrinsic_value
-from backend.app.pricing.base import Pricer
+from backend.app.pricing.base import Pricer, require_european_exercise
 
 
 def discounted_spot_and_strike(
@@ -72,6 +72,7 @@ def black_scholes_price(contract: OptionContract, market: MarketEnvironment) -> 
     deterministic discounted-forward limit and never divides by zero.
     """
 
+    require_european_exercise(contract, engine="Black-Scholes")
     maturity = contract.maturity_years
     if maturity == 0.0:
         return intrinsic_value(contract.option_type, contract.spot, contract.strike)

@@ -41,8 +41,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.7.0",
-    description="European option research with Monte Carlo, analytical, and CRR pricing",
+    version="0.8.0",
+    description=(
+        "European and American option research with analytical, Monte Carlo, and CRR pricing"
+    ),
     lifespan=lifespan,
 )
 app.include_router(pricing_router)

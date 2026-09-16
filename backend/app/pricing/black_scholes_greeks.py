@@ -9,6 +9,7 @@ from backend.app.models.greeks import Greek
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract, OptionType
 from backend.app.models.results import AnalyticalGreeksResult
+from backend.app.pricing.base import require_european_exercise
 from backend.app.pricing.black_scholes import (
     black_scholes_d1_d2,
     black_scholes_price,
@@ -103,6 +104,7 @@ def black_scholes_greeks(
     absolute dividend-yield, and year units respectively.
     """
 
+    require_european_exercise(contract, engine="Black-Scholes Greeks")
     maturity = contract.maturity_years
     if maturity == 0.0:
         return _expiry_greeks(contract, market)

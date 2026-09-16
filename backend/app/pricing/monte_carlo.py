@@ -21,7 +21,7 @@ from backend.app.models.option import OptionContract, OptionType
 from backend.app.models.results import MonteCarloResult
 from backend.app.models.simulation import SimulationConfig, VarianceReduction
 from backend.app.payoffs.vanilla import vanilla_payoff
-from backend.app.pricing.base import Pricer
+from backend.app.pricing.base import Pricer, require_european_exercise
 from backend.app.pricing.variance_reduction import (
     apply_control_variate,
     cluster_observations,
@@ -52,6 +52,7 @@ class MonteCarloPricer(Pricer[SimulationConfig, MonteCarloResult]):
         identical PCG64 stream and numerical result. API limits bound allocation.
         """
 
+        require_european_exercise(contract, engine="terminal Monte Carlo pricing")
         started = perf_counter()
         logger.debug("monte_carlo_config=%s", config.model_dump(mode="json"))
         rng = create_rng(config.seed, config.random_engine)

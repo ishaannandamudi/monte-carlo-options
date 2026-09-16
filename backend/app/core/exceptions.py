@@ -58,7 +58,7 @@ class InvalidRiskNeutralProbabilityError(BinomialTreeError):
 
 
 class UnsupportedExerciseStyleError(BinomialTreeError):
-    """Raised when a tree request is not European in Phase 7."""
+    """Raised when a pricing or analytics engine cannot honor the exercise style."""
 
 
 class ProviderError(MarketDataError):

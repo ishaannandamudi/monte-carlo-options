@@ -12,15 +12,19 @@ from backend.app.analytics.binomial import (
 )
 from backend.app.core.config import Settings, get_settings
 from backend.app.models.binomial import (
+    AmericanBinomialComparison,
+    AmericanBinomialConvergenceResult,
+    AmericanBinomialPricingResult,
     BinomialComparison,
     BinomialConvergenceResult,
     BinomialPricingResult,
     BinomialTreeConfig,
+    ExerciseBoundaryResult,
     TreeModel,
 )
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract
-from backend.app.pricing.binomial import binomial_price
+from backend.app.pricing.binomial import american_exercise_boundary, binomial_price
 
 logger = logging.getLogger(__name__)
 pricing_router = APIRouter(prefix="/api/pricing", tags=["pricing"])
@@ -46,6 +50,7 @@ class BinomialConvergenceRequest(BinomialRequestModel):
     model: TreeModel = TreeModel.CRR
     probability_tolerance: float = Field(default=1e-12, ge=0.0, le=1e-6)
     arbitrage_tolerance: float = Field(default=1e-10, ge=0.0, le=1e-4)
+    exercise_tolerance: float = Field(default=1e-12, ge=0.0, le=1e-4)
 
 
 def _enforce_step_limit(steps: int, settings: Settings) -> None:
@@ -56,12 +61,14 @@ def _enforce_step_limit(steps: int, settings: Settings) -> None:
         )
 
 
-@pricing_router.post("/binomial", response_model=BinomialPricingResult)
+@pricing_router.post(
+    "/binomial", response_model=BinomialPricingResult | AmericanBinomialPricingResult
+)
 def price_binomial(
     request: BinomialPricingRequest,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> BinomialPricingResult:
-    """Price one European option with a bounded CRR tree."""
+) -> BinomialPricingResult | AmericanBinomialPricingResult:
+    """Price one European or American option with a bounded CRR tree."""
 
     _enforce_step_limit(request.tree.steps, settings)
     logger.info(
@@ -73,12 +80,12 @@ def price_binomial(
     return binomial_price(request.contract, request.market, request.tree)
 
 
-@analytics_router.post("/compare", response_model=BinomialComparison)
+@analytics_router.post("/compare", response_model=BinomialComparison | AmericanBinomialComparison)
 def compare_binomial(
     request: BinomialPricingRequest,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> BinomialComparison:
-    """Compare CRR price and native Greeks with Black-Scholes values."""
+) -> BinomialComparison | AmericanBinomialComparison:
+    """Compare CRR exercise styles with the appropriate European benchmarks."""
 
     _enforce_step_limit(request.tree.steps, settings)
     logger.info(
@@ -89,11 +96,30 @@ def compare_binomial(
     return compare_binomial_to_black_scholes(request.contract, request.market, request.tree)
 
 
-@analytics_router.post("/convergence", response_model=BinomialConvergenceResult)
+@analytics_router.post("/exercise-boundary", response_model=ExerciseBoundaryResult)
+def binomial_exercise_boundary(
+    request: BinomialPricingRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ExerciseBoundaryResult:
+    """Extract an American CRR early-exercise boundary under the API step limit."""
+
+    _enforce_step_limit(request.tree.steps, settings)
+    logger.info(
+        "binomial_exercise_boundary_request model=%s steps=%d",
+        request.tree.model.value,
+        request.tree.steps,
+    )
+    return american_exercise_boundary(request.contract, request.market, request.tree)
+
+
+@analytics_router.post(
+    "/convergence",
+    response_model=BinomialConvergenceResult | AmericanBinomialConvergenceResult,
+)
 def binomial_convergence(
     request: BinomialConvergenceRequest,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> BinomialConvergenceResult:
+) -> BinomialConvergenceResult | AmericanBinomialConvergenceResult:
     """Run a bounded deterministic CRR step-convergence experiment."""
 
     if len(request.step_counts) > settings.max_binomial_convergence_points:
@@ -118,4 +144,5 @@ def binomial_convergence(
         model=request.model,
         probability_tolerance=request.probability_tolerance,
         arbitrage_tolerance=request.arbitrage_tolerance,
+        exercise_tolerance=request.exercise_tolerance,
     )

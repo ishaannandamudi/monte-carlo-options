@@ -1,4 +1,4 @@
-"""European vanilla-option contract definitions."""
+"""Vanilla-option contract definitions."""
 
 from enum import StrEnum
 from typing import Annotated
@@ -14,9 +14,10 @@ class OptionType(StrEnum):
 
 
 class ExerciseStyle(StrEnum):
-    """Supported exercise rules; Phase 1 intentionally contains only European."""
+    """Supported vanilla exercise rules."""
 
     EUROPEAN = "EUROPEAN"
+    AMERICAN = "AMERICAN"
 
 
 PositiveFloat = Annotated[float, Field(gt=0.0)]
@@ -24,7 +25,7 @@ NonNegativeFloat = Annotated[float, Field(ge=0.0)]
 
 
 class OptionContract(BaseModel):
-    """Continuous model inputs for a European option, not accounting ledger values."""
+    """Continuous option-model inputs, not accounting ledger values."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 

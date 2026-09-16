@@ -25,6 +25,7 @@ from backend.app.models.volatility import (
     ImpliedVolatilityObservation,
     ImpliedVolatilityStatus,
 )
+from backend.app.pricing.base import require_european_exercise
 from backend.app.pricing.black_scholes import black_scholes_price
 from backend.app.pricing.black_scholes_greeks import black_scholes_greeks
 
@@ -114,6 +115,7 @@ def european_option_price_bounds(
 ) -> EuropeanPriceBounds:
     """Return the appropriate reusable call or put no-arbitrage bounds."""
 
+    require_european_exercise(contract, engine="European price bounds")
     arguments = (
         contract.spot,
         contract.strike,
@@ -360,6 +362,7 @@ def solve_implied_volatility(
 ) -> ImpliedVolatilityResult:
     """Invert one European Black-Scholes price under an explicit solver policy."""
 
+    require_european_exercise(observation.contract, engine="implied volatility")
     solver_config = config or ImpliedVolatilityConfig()
     started = perf_counter()
     bounds = european_option_price_bounds(observation.contract, observation.market)

@@ -79,9 +79,9 @@ V(i,j) = disc [(1-p)V(i+1,j) + p V(i+1,j+1)]
 
 Only the next-level vector is needed. Every reduction replaces a vector of length `i+2` with one of
 length `i+1`; peak storage is therefore O(N), although the total arithmetic work is O(N²). The
-continuation calculation is isolated in `_continuation_values`. Phase 8 can put an exercise-policy
-comparison around this step without changing CRR parameters or terminal construction. Phase 7 does
-not calculate exercise value or expose an American contract.
+continuation calculation is isolated in `_continuation_values`. Phase 8 places its exercise-policy
+comparison around this step without changing the Phase 7 CRR parameters, terminal construction, or
+European reduction path. See `phase8-american-options.md`.
 
 ## Deterministic boundaries
 
@@ -209,8 +209,8 @@ the 10,000-step ceiling as a safety limit rather than a routine resolution.
 - `POST /api/analytics/binomial/convergence` returns ordered points and adjacent odd/even pairs.
 
 Requests use the existing `OptionContract` and `MarketEnvironment` plus `BinomialTreeConfig`.
-`OptionContract` currently admits only `EUROPEAN`; an `AMERICAN` request is rejected during API
-validation and the pricer also checks exercise style defensively.
+`OptionContract` now also admits `AMERICAN` for the Phase 8 extension. The Phase 7 response and
+European behavior remain unchanged; European-only engines reject the new style explicitly.
 
 ## Validation strategy
 
@@ -221,10 +221,10 @@ volatility, and deep ITM/OTM states. Economic monotonicity, put-call parity, Pha
 repeatability, native Greek convergence, and explicit odd/even sign oscillation are tested. API
 tests cover serialization, limits, unsupported models/exercise, and typed numerical errors.
 
-## Deferred Phase 8 and future extensions
+## Phase 8 extension and future work
 
-American early exercise, Bermudan schedules, exercise boundaries, and Longstaff-Schwartz remain
-outside Phase 7. Phase 8 can compare continuation with intrinsic value after each continuation step
-without replacing terminal payoff or CRR construction. Additional parameterizations such as
+American early exercise and compact exercise boundaries are implemented in Phase 8 by comparing
+continuation with intrinsic value after each continuation step. Bermudan schedules and
+Longstaff-Schwartz remain deferred. Additional parameterizations such as
 Jarrow-Rudd, Tian, or Leisen-Reimer may later implement the same typed tree interface, but Phase 7
 contains only the fully tested CRR model.

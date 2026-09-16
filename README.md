@@ -6,7 +6,8 @@ geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statisti
 uncertainty diagnostics, advanced variance reduction, first-class Greeks, and robust implied-
 volatility inversion. It also normalizes real option-market snapshots and constructs queryable
 volatility smiles and surfaces with static-arbitrage diagnostics. A memory-efficient CRR binomial
-engine supplies a discrete-time European pricing benchmark and native tree Greeks.
+engine prices European and American contracts, extracts early-exercise boundaries, and supplies
+native tree Greeks.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -43,15 +44,18 @@ currency-safe decimal amounts.
 - Strike-monotonicity, irregular-grid butterfly, and calendar-total-variance diagnostics
 - ATM-forward term structures and coordinate-based local skew and curvature metrics
 - Cox-Ross-Rubinstein European call and put pricing with continuous dividends
+- Cox-Ross-Rubinstein American call and put pricing with node-level early exercise
+- Same-tree early-exercise premiums and compact exercise-boundary diagnostics
 - O(N)-memory backward induction and explicit risk-neutral probability validation
 - Tree-native Delta, Gamma, and calendar-time Theta from early lattice levels
 - CRR convergence analytics with Black-Scholes and odd/even diagnostics
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes surface fitting/repair, American option pricing,
-path-dependent options, non-CRR tree models, calibration, stochastic volatility, local volatility, jumps,
-multi-asset models, portfolio risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
+The current scope deliberately excludes surface fitting/repair, American Monte Carlo and
+Longstaff-Schwartz, path-dependent options, non-CRR tree models, calibration, stochastic volatility,
+local volatility, jumps, multi-asset models, portfolio risk, parallelism, a GPU backend,
+quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
 
@@ -321,9 +325,10 @@ curvature are centered finite differences with respect to `k`, not delta-based m
 See [docs/phase6-volatility-surfaces.md](docs/phase6-volatility-surfaces.md) for construction rules,
 query algorithms, equations, diagnostic tolerances, testing strategy, and limitations.
 
-## Cox-Ross-Rubinstein binomial trees
+## Cox-Ross-Rubinstein binomial trees and American exercise
 
-Phase 7 prices European calls and puts on a recombining discrete-time tree. For `N` steps,
+The CRR engine prices European and American calls and puts on a recombining discrete-time tree. For
+`N` steps,
 
 ```text
 dt = T/N
@@ -338,24 +343,35 @@ than clamped; only endpoint overshoot within the configured floating-point toler
 This allows negative rates, positive or negative dividends, and `q > r` whenever the CRR no-
 arbitrage condition remains valid.
 
-Terminal stock prices are indexed by their number of up moves. Existing vectorized call/put
-payoffs create the terminal value vector, then backward induction repeatedly applies
-`disc[(1-p)V_down + pV_up]`. Only one level is retained, so peak memory is O(N). Arithmetic remains
-O(N²). No early-exercise maximum is taken.
+Terminal stock prices are indexed by their number of up moves. Existing vectorized call/put payoffs
+create the terminal vector. Each backward level first computes continuation
+`disc[(1-p)V_down + pV_up]`. European nodes retain continuation; American nodes use
+`max(intrinsic, continuation)`. Pricing uses the exact maximum, while a configurable tolerance is
+used only to classify exercise nodes. The American result reports its premium over a European root
+reduced on the same tree.
 
-Zero maturity returns intrinsic value without constructing parameters. Zero volatility uses the
-exact deterministic terminal stock `S exp((r-q)T)` and discounts its payoff; it never divides by
-the degenerate `u-d`. Native Delta comes from level one. Gamma uses the difference between level-two
-up and down Deltas, divided by average outer-node spacing. Theta compares the middle level-two node
-with the root over `2dt`, matching the calendar-time convention used by analytical Greeks.
+Only current vectors and the early levels needed for Greeks are retained. Peak working memory is
+O(N), arithmetic is O(N²), and boundary extraction stores at most one O(N) record per time level.
+For puts the boundary is the highest exercising stock in the low-stock region; for dividend-paying
+calls it is the lowest exercising stock in the high-stock region. Maturity payoff is never labeled
+early exercise. A non-dividend American call under standard positive-rate assumptions has no early
+exercise value; sufficiently high continuous dividends can make call exercise optimal. American
+puts commonly have a positive early-exercise premium.
+
+Zero maturity returns intrinsic value without constructing parameters. For zero-volatility
+American contracts, the engine evaluates the deterministic stock path at every tree date and
+maximizes the present intrinsic value across those exercise opportunities. Native Delta comes from
+level one after exercise decisions. Gamma uses post-exercise level-two values, and Theta compares
+the post-exercise middle level-two node with the root over `2dt`. American Greeks can be less smooth
+near an exercise boundary.
 
 CRR values approach Black-Scholes as the number of steps grows, but strike placement commonly
 causes alternating odd/even errors. Convergence analytics retain each canonical result and expose
 neighboring-step averages only as diagnostics. They never silently replace a tree price.
 
-See [docs/phase7-binomial-trees.md](docs/phase7-binomial-trees.md) for formulas, indexing, Greeks,
-probability policy, numerical safeguards, convergence behavior, and the limited Phase 8 extension
-hook.
+See [docs/phase7-binomial-trees.md](docs/phase7-binomial-trees.md) for the European foundation and
+[docs/phase8-american-options.md](docs/phase8-american-options.md) for the exercise policy,
+premium, boundary definitions, deterministic case, American Greeks, convergence, and API design.
 
 ## Reproducibility and convergence
 
@@ -553,7 +569,28 @@ Available endpoints:
 - `POST /api/analytics/volatility/surface/diagnostics`
 - `POST /api/analytics/volatility/surface/atm-term-structure`
 - `POST /api/analytics/binomial/compare`
+- `POST /api/analytics/binomial/exercise-boundary`
 - `POST /api/analytics/binomial/convergence`
+
+Price an American put and return its same-tree European comparator and exercise summary:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/pricing/binomial \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "PUT", "exercise_style": "AMERICAN",
+      "spot": 100.0, "strike": 100.0, "maturity_years": 1.0
+    },
+    "market": {
+      "risk_free_rate": 0.05, "volatility": 0.2, "dividend_yield": 0.0
+    },
+    "tree": {"steps": 500, "model": "CRR", "exercise_tolerance": 1e-12}
+  }'
+```
+
+Send the same body to `/api/analytics/binomial/exercise-boundary` to receive the ordered compact
+frontier. A European contract is rejected by that boundary-only endpoint.
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -656,8 +693,10 @@ zero uncertainty; deterministic cases remain exact.
 The normal suite uses fixed seeds, moderate sample sizes, analytical identities, deterministic edge
 cases, theoretical GBM moments, direct pair/control/CRN calculations, analytical Greek identities,
 and statistically scaled Monte Carlo tolerances such as `abs(estimate - benchmark) <= k * SE`.
-Binomial tests directly reproduce one- and two-step lattices, then use Black-Scholes and analytical
-Greeks as convergence references without assuming every successive step count improves.
+Binomial tests directly reproduce European and American one- and two-step lattices, check same-tree
+dominance, boundary decisions, deterministic exercise timing, and canonical American put values,
+then use Black-Scholes and analytical Greeks where a European comparison is valid. Convergence tests
+do not assume every successive step count improves.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -665,7 +704,8 @@ APIs, and an autouse socket guard rejects accidental network access.
 
 ## Model assumptions and limitations
 
-- European exercise only
+- European exercise for Black-Scholes, implied volatility, terminal Monte Carlo, and their Greeks
+- European or American exercise for the CRR binomial engine
 - Frictionless market and continuous trading as assumed by Black-Scholes
 - Risk-neutral GBM with lognormal stock prices
 - Constant volatility
@@ -685,26 +725,28 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Surface log-moneyness uses the maturity-specific forward under those flat carry assumptions
 - Default surface queries do not extrapolate beyond observed strike or maturity support
 - Local skew and curvature are derivatives with respect to log-forward-moneyness
-- Binomial pricing uses only CRR, European exercise, and constant per-tree market assumptions
+- Binomial pricing uses only CRR and constant per-tree market assumptions
+- American exercise is available only on discrete CRR dates; no discrete-dividend schedule is modeled
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
 - No settlement, exercise, or instrument taxonomy beyond reported provider metadata is inferred
 
 U.S. listed equity and ETF options are generally American-style. Phase 5 preserves the provider's
-actual exercise style but uses European Black-Scholes implied volatility as a stated analytical
-convention until an American pricer exists. The enriched result marks this approximation. Early
-exercise value, discrete dividends, liquidity, transaction costs, and market microstructure are not
-modeled.
+actual exercise style but continues to use European Black-Scholes implied volatility as a stated
+analytical convention. Phase 8 does not silently replace that IV convention or add American implied
+volatility. The CRR engine can separately price an explicitly supplied American contract. Discrete
+dividends, liquidity, transaction costs, and market microstructure are not modeled.
 
-At `T = 0`, all pricing engines return intrinsic value. At `sigma = 0`, all use the discounted
-deterministic risk-neutral terminal payoff. Derived values outside finite floating-point range raise
-a quantitative domain error rather than returning NaN or infinity.
+At `T = 0`, all pricing engines return intrinsic value. At `sigma = 0`, European engines use the
+discounted deterministic terminal payoff, while the American CRR engine optimizes over its discrete
+deterministic exercise dates. Derived values outside finite floating-point range raise a quantitative
+domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
 Future phases can add parametric surface fitting, quote-repair policy, full paths, additional
-variance-reduction techniques, American exercise and Longstaff-Schwartz, Asian and
+variance-reduction techniques, Longstaff-Schwartz American Monte Carlo, Asian and
 barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,

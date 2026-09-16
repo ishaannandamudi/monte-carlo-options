@@ -22,6 +22,7 @@ from backend.app.models.results import (
 )
 from backend.app.models.simulation import SimulationConfig, VarianceReduction
 from backend.app.payoffs.vanilla import vanilla_payoff
+from backend.app.pricing.base import require_european_exercise
 from backend.app.pricing.variance_reduction import (
     ClusteredObservations,
     apply_control_variate,
@@ -184,6 +185,7 @@ def finite_difference_greeks(
 ) -> list[FiniteDifferenceGreekResult]:
     """Estimate requested Greeks from direct CRN cluster differences."""
 
+    require_european_exercise(contract, engine="Monte Carlo Greeks")
     requested = list(greeks)
     if not requested:
         raise ValueError("at least one Greek is required")
@@ -408,6 +410,7 @@ def pathwise_greeks(
 ) -> list[PathwiseGreekResult]:
     """Estimate pathwise Delta/Vega with exact antithetic cluster uncertainty."""
 
+    require_european_exercise(contract, engine="Monte Carlo Greeks")
     requested = list(greeks)
     if not requested:
         raise ValueError("at least one Greek is required")
@@ -485,6 +488,7 @@ def monte_carlo_greeks(
 ) -> MonteCarloGreeksResult:
     """Dispatch one supported Monte Carlo Greek estimator method."""
 
+    require_european_exercise(contract, engine="Monte Carlo Greeks")
     if method is GreekMethod.FINITE_DIFFERENCE:
         results: list[FiniteDifferenceGreekResult | PathwiseGreekResult] = list(
             finite_difference_greeks(contract, market, config, greeks, bump_config)

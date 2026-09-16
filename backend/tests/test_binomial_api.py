@@ -81,7 +81,9 @@ def test_binomial_api_step_and_point_limits(client: TestClient) -> None:
     assert "API limit" in too_many_points.json()["detail"]
 
 
-def test_invalid_model_and_american_exercise_are_rejected(client: TestClient) -> None:
+def test_invalid_model_is_rejected_and_american_exercise_is_accepted(
+    client: TestClient,
+) -> None:
     invalid_model = request_body()
     invalid_model["tree"] = {"steps": 10, "model": "TIAN"}
     model_response = client.post("/api/pricing/binomial", json=invalid_model)
@@ -91,8 +93,8 @@ def test_invalid_model_and_american_exercise_are_rejected(client: TestClient) ->
     contract["exercise_style"] = "AMERICAN"
     exercise_response = client.post("/api/pricing/binomial", json=american)
     assert model_response.status_code == 422
-    assert exercise_response.status_code == 422
-    assert "EUROPEAN" in exercise_response.text
+    assert exercise_response.status_code == 200
+    assert exercise_response.json()["exercise_style"] == "AMERICAN"
 
 
 def test_invalid_crr_probability_returns_clear_422(client: TestClient) -> None:
