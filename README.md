@@ -7,14 +7,15 @@ uncertainty diagnostics, advanced variance reduction, first-class Greeks, and ro
 volatility inversion. It also normalizes real option-market snapshots and constructs queryable
 volatility smiles and surfaces with static-arbitrage diagnostics. A memory-efficient CRR binomial
 engine prices European and American contracts, extracts early-exercise boundaries, and supplies
-native tree Greeks.
+native tree Greeks. Longstaff-Schwartz Monte Carlo adds full-path GBM, learned American exercise
+policies, and independent policy valuation against the CRR benchmark.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
 
 ## Current capabilities
 
-- Validated European call and put contracts and separate constant market assumptions
+- Validated European/American call and put contracts and separate constant market assumptions
 - Risk-neutral GBM terminal simulation with continuous dividend yield
 - Plain Monte Carlo and antithetic variates
 - Discounted-terminal-stock control variates and combined antithetic plus control variates
@@ -49,11 +50,16 @@ currency-safe decimal amounts.
 - O(N)-memory backward induction and explicit risk-neutral probability validation
 - Tree-native Delta, Gamma, and calendar-time Theta from early lattice levels
 - CRR convergence analytics with Black-Scholes and odd/even diagnostics
+- Exact full-path GBM with reproducible interleaved antithetic paths
+- Longstaff-Schwartz American pricing with POWER/LAGUERRE regression on normalized S/K
+- Independent training and valuation streams, plus explicit in-sample mode
+- Regression rank/fallback diagnostics, empirical stopping boundaries, and CRR comparisons
+- Path-count, exercise-grid, and basis-comparison experiments
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes surface fitting/repair, American Monte Carlo and
-Longstaff-Schwartz, path-dependent options, non-CRR tree models, calibration, stochastic volatility,
+The current scope deliberately excludes surface fitting/repair, path-dependent options,
+non-CRR tree models, calibration, stochastic volatility,
 local volatility, jumps, multi-asset models, portfolio risk, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
@@ -351,7 +357,8 @@ used only to classify exercise nodes. The American result reports its premium ov
 reduced on the same tree.
 
 Only current vectors and the early levels needed for Greeks are retained. Peak working memory is
-O(N), arithmetic is O(N²), and boundary extraction stores at most one O(N) record per time level.
+O(N), arithmetic is O(N²), and boundary extraction stores at most one constant-size record per
+time level, using O(N) additional storage.
 For puts the boundary is the highest exercising stock in the low-stock region; for dividend-paying
 calls it is the lowest exercising stock in the high-stock region. Maturity payoff is never labeled
 early exercise. A non-dividend American call under standard positive-rate assumptions has no early
@@ -365,7 +372,7 @@ level one after exercise decisions. Gamma uses post-exercise level-two values, a
 the post-exercise middle level-two node with the root over `2dt`. American Greeks can be less smooth
 near an exercise boundary.
 
-CRR values approach Black-Scholes as the number of steps grows, but strike placement commonly
+European CRR values approach Black-Scholes as the number of steps grows, but strike placement commonly
 causes alternating odd/even errors. Convergence analytics retain each canonical result and expose
 neighboring-step averages only as diagnostics. They never silently replace a tree price.
 
@@ -373,9 +380,55 @@ See [docs/phase7-binomial-trees.md](docs/phase7-binomial-trees.md) for the Europ
 [docs/phase8-american-options.md](docs/phase8-american-options.md) for the exercise policy,
 premium, boundary definitions, deterministic case, American Greeks, convergence, and API design.
 
+## Longstaff-Schwartz American Monte Carlo
+
+LSM simulates a float64 matrix of shape `(paths, time_steps + 1)` using exact GBM log increments.
+It learns continuation value backward over discrete exercise dates. At each date, only current
+in-the-money paths enter a least-squares regression. The response is that path's currently selected
+future cash flow discounted from its selected exercise date to the regression date. Exercising
+replaces both the future cash flow and its stopping time; continuing retains them. The final value
+discounts each selected cash flow once to time zero.
+
+The default regression uses degree-two POWER polynomials on `x=S/K`. Standard unweighted LAGUERRE
+polynomials are also available; both span the same polynomial space at a given degree.
+`numpy.linalg.lstsq` supplies coefficients and rank diagnostics. Too few ITM paths or a rank-deficient
+fit trigger an explicit continue-all fallback for that date. Large condition numbers are flagged.
+Exercise occurs when intrinsic exceeds nonnegative predicted continuation plus the configured
+tolerance. Zero-volatility pricing directly maximizes deterministic present intrinsic values over
+the configured dates; zero maturity returns intrinsic without simulation.
+
+OUT_OF_SAMPLE is the default: one deterministic child stream trains the policy and another
+independent child evaluates it forward. The policy includes the root decision, so evaluation does
+not refit or choose a new stopping rule from held-out results. IN_SAMPLE is also supported. All
+dates are exercisable by default; an optional sorted `exercise_steps` subset must include maturity.
+These are approximations to continuous American exercise. For no-dividend calls with nonnegative
+rates, the engine uses the known continue-to-maturity policy to avoid regression-induced exercise.
+
+The reported SE uses discounted realized valuation cash flows, including zero-payoff paths.
+Antithetic SE uses pair averages, with the existing weighted-cluster treatment of an odd singleton.
+In out-of-sample mode the normal interval measures sampling error conditional on the learned
+policy; it excludes policy-training variation, basis error, and exercise-grid error. In-sample SE
+is descriptive because shared fitting introduces dependence and bias. A held-out policy estimate
+may fall below intrinsic or the European reference through sampling noise or an imperfect learned
+policy; diagnostics report this without silently clipping the held-out mean.
+
+Empirical boundaries use final positive exercise observations: the highest exercised stock for a
+put and the lowest for a call, subject to a minimum sample count. Maturity is excluded. Boundaries
+and regression details are bounded in API responses. No smooth or exact frontier is claimed.
+Optional CRR boundary comparisons report stock differences at supported, exactly shared grid dates.
+
+Defaults are 25,000 training plus 25,000 valuation paths, 50 time steps, antithetic sampling, and
+seed 42. Full-path storage costs O(paths × steps); the training matrix is released before valuation
+simulation. Research endpoints compare the LSM value with a configurable CRR American tree, vary
+path count or time steps with independent child seeds, and compare bases with shared streams.
+See [docs/phase9-longstaff-schwartz.md](docs/phase9-longstaff-schwartz.md) for formulas, policies,
+uncertainty interpretation, resource accounting, and tests.
+See [the Phase 9 validation report](benchmarks/phase9-lsm.md) for measured timings and research
+examples.
+
 ## Reproducibility and convergence
 
-Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
+Every stochastic pricing call constructs an isolated `numpy.random.Generator` backed by `PCG64`.
 The code never uses NumPy's global random state. Identical model inputs, simulation configuration,
 seed, and supported numerical environment reproduce all quantitative outputs exactly; measured
 wall-clock runtime naturally varies.
@@ -412,7 +465,7 @@ backend/app/
 ├── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
-benchmarks/        # reserved for opt-in quantitative benchmarks
+benchmarks/        # quantitative benchmark and validation reports
 docs/              # architecture and numerical methodology
 experiments/       # reserved for explicit research experiments
 ```
@@ -546,6 +599,10 @@ Available endpoints:
 - `POST /api/pricing/black-scholes`
 - `POST /api/pricing/compare`
 - `POST /api/pricing/binomial`
+- `POST /api/pricing/longstaff-schwartz`
+- `POST /api/analytics/longstaff-schwartz/compare`
+- `POST /api/analytics/longstaff-schwartz/convergence`
+- `POST /api/analytics/longstaff-schwartz/basis-comparison`
 - `POST /api/analytics/convergence`
 - `POST /api/analytics/variance-reduction`
 - `POST /api/greeks/black-scholes`
@@ -592,7 +649,35 @@ curl -X POST http://127.0.0.1:8000/api/pricing/binomial \
 Send the same body to `/api/analytics/binomial/exercise-boundary` to receive the ordered compact
 frontier. A European contract is rejected by that boundary-only endpoint.
 
-The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
+Price the same American put by independent LSM policy evaluation:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/pricing/longstaff-schwartz \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "PUT", "exercise_style": "AMERICAN",
+      "spot": 100.0, "strike": 100.0, "maturity_years": 1.0
+    },
+    "market": {"risk_free_rate": 0.05, "volatility": 0.2, "dividend_yield": 0.0},
+    "lsm": {
+      "num_paths": 25000, "regression_paths": 25000, "num_time_steps": 50,
+      "seed": 42, "evaluation_mode": "OUT_OF_SAMPLE",
+      "variance_reduction": "ANTITHETIC", "basis_family": "POWER", "basis_degree": 2,
+      "store_regression_diagnostics": true
+    }
+  }'
+```
+
+Use the LSM `/compare` endpoint with optional `"tree":{"steps":1000}` and
+`"include_boundary_comparison":true` for supported common-date boundary differences.
+LSM `/convergence` also
+takes `"mode":"PATH_COUNT"` and `"values":[1000,5000,10000]`, or `"mode":"TIME_STEPS"` with
+step counts. LSM `/basis-comparison` accepts `"families":["POWER","LAGUERRE"]` and
+`"degrees":[1,2,3,4]`. Regression details are optional in the pricing response.
+
+The original European `/api/analytics/convergence` body replaces `simulation` with
+`simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
 `/docs` while the service is running.
 
@@ -656,6 +741,11 @@ MAX_SURFACE_QUERY_POINTS=1000
 MAX_DIAGNOSTIC_GRID_POINTS=10000
 MAX_BINOMIAL_STEPS=10000
 MAX_BINOMIAL_CONVERGENCE_POINTS=20
+MAX_LSM_PATHS=500000
+MAX_LSM_TIME_STEPS=500
+MAX_LSM_TOTAL_PATH_NODES=25000000
+MAX_LSM_CONVERGENCE_POINTS=20
+MAX_LSM_DIAGNOSTIC_DATES=100
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -681,6 +771,10 @@ independent replication to estimate uncertainty: at least two paths for plain Mo
 least two antithetic clusters. Smaller stochastic requests fail clearly instead of reporting false
 zero uncertainty; deterministic cases remain exact.
 
+LSM's node budget sums training and valuation paths times `(steps+1)` across every point in a
+request. Each sample set must also fit the path ceiling. Optional diagnostic lists are capped by
+`MAX_LSM_DIAGNOSTIC_DATES`; output truncation is explicit and does not change prices.
+
 ## Tests and quality checks
 
 ```bash
@@ -697,6 +791,9 @@ Binomial tests directly reproduce European and American one- and two-step lattic
 dominance, boundary decisions, deterministic exercise timing, and canonical American put values,
 then use Black-Scholes and analytical Greeks where a European comparison is valid. Convergence tests
 do not assume every successive step count improves.
+LSM tests include hand-constructed path matrices, exact stopping-time discounting and replacement,
+frozen-policy evaluation, training/valuation independence, pair and odd-cluster uncertainty,
+regression fallbacks, deterministic cases, and representative American comparisons with CRR.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -713,7 +810,7 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Constant continuous dividend yield, which may be negative
 - No jumps or stochastic volatility
 - No transaction costs, liquidity effects, discrete hedging, or model calibration
-- Terminal-only simulation; no path-dependent state
+- Terminal and full-path GBM simulation; LSM regression uses current stock only
 - Normal-approximation confidence intervals
 - Greeks use raw model units and the calendar-time Theta convention
 - Pathwise differentiation is limited to Delta and Vega
@@ -726,7 +823,9 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Default surface queries do not extrapolate beyond observed strike or maturity support
 - Local skew and curvature are derivatives with respect to log-forward-moneyness
 - Binomial pricing uses only CRR and constant per-tree market assumptions
-- American exercise is available only on discrete CRR dates; no discrete-dividend schedule is modeled
+- American exercise is available on discrete CRR or LSM dates; no discrete-dividend schedule is modeled
+- LSM exercise uses a discrete simulation schedule and a polynomial continuation approximation
+- LSM SE does not include policy-training variation or exercise-grid approximation error
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -746,7 +845,7 @@ domain error rather than returning NaN or infinity.
 ## Roadmap
 
 Future phases can add parametric surface fitting, quote-repair policy, full paths, additional
-variance-reduction techniques, Longstaff-Schwartz American Monte Carlo, Asian and
+variance-reduction techniques, richer stopping policies, Asian and
 barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,

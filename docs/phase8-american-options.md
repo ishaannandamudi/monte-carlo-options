@@ -250,10 +250,10 @@ volatility as their documented convention, including for provider metadata that 
 listed contract as American. Phase 8 adds an American price engine; it does not add American implied
 volatility or change stored surface semantics.
 
-## 26. Longstaff-Schwartz is deferred
+## 26. Subsequent Longstaff-Schwartz extension
 
-Phase 8 contains no American Monte Carlo, regression basis, stopping-time path simulation, or
-Longstaff-Schwartz implementation. A future Phase 9 can compare its stopping estimator with this
-CRR benchmark while reusing existing contracts, markets, RNG ownership, payoff functions, and typed
-analytics. Bermudan schedules, discrete dividends, exotics, and alternative lattice
-parameterizations are also outside this phase.
+Phase 8's CRR engine contains no American Monte Carlo or regression logic. Phase 9 adds a separate
+Longstaff-Schwartz engine and compares its learned stopping policy with this CRR benchmark while
+reusing contracts, markets, RNG ownership, and payoffs. See
+[phase9-longstaff-schwartz.md](phase9-longstaff-schwartz.md). Discrete dividends, exotic payoffs,
+and alternative lattice parameterizations remain outside these phases.

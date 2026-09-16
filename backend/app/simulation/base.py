@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract
-from backend.app.models.simulation import SimulationConfig
+from backend.app.models.simulation import PathSimulationConfig, SimulationConfig
 
 
 class StochasticProcess(ABC):
@@ -23,3 +23,17 @@ class StochasticProcess(ABC):
         rng: Generator,
     ) -> NDArray[np.float64]:
         """Return exactly ``config.num_simulations`` terminal spot observations."""
+
+
+class PathStochasticProcess(ABC):
+    """Separate full-path capability; terminal-only implementations stay valid."""
+
+    @abstractmethod
+    def simulate_paths(
+        self,
+        contract: OptionContract,
+        market: MarketEnvironment,
+        config: PathSimulationConfig,
+        rng: Generator,
+    ) -> NDArray[np.float64]:
+        """Return (num_simulations, num_time_steps + 1), starting at spot."""

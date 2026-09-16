@@ -22,6 +22,11 @@ class Settings(BaseModel):
     max_diagnostic_grid_points: int = Field(default=10_000, gt=0)
     max_binomial_steps: int = Field(default=10_000, gt=0)
     max_binomial_convergence_points: int = Field(default=20, gt=0)
+    max_lsm_paths: int = Field(default=500_000, gt=0)
+    max_lsm_time_steps: int = Field(default=500, gt=0)
+    max_lsm_total_path_nodes: int = Field(default=25_000_000, gt=0)
+    max_lsm_convergence_points: int = Field(default=20, gt=0)
+    max_lsm_diagnostic_dates: int = Field(default=100, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -35,6 +40,15 @@ class Settings(BaseModel):
         """Load recognized values from conventional uppercase environment variables."""
 
         values: dict[str, object] = {}
+        for field in (
+            "max_lsm_paths",
+            "max_lsm_time_steps",
+            "max_lsm_total_path_nodes",
+            "max_lsm_convergence_points",
+            "max_lsm_diagnostic_dates",
+        ):
+            if value := os.getenv(field.upper()):
+                values[field] = value
         if value := os.getenv("MAX_API_SIMULATIONS"):
             values["max_api_simulations"] = value
         if value := os.getenv("MAX_CONVERGENCE_POINTS"):

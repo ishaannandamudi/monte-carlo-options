@@ -28,6 +28,22 @@ from backend.app.models.greeks import (
     GreekMethod,
     SensitivityParameter,
 )
+from backend.app.models.longstaff_schwartz import (
+    BasisFamily,
+    LongstaffSchwartzConfig,
+    LongstaffSchwartzResult,
+    LSMBasisComparisonResult,
+    LSMBoundaryComparisonPoint,
+    LSMBoundaryPoint,
+    LSMComparison,
+    LSMConvergenceMode,
+    LSMConvergenceResult,
+    LSMEvaluationMode,
+    LSMPolicy,
+    LSMRegressionDiagnostic,
+    LSMResearchPoint,
+    RegressionFallback,
+)
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.market_data import (
     MarketDataSource,
@@ -75,7 +91,12 @@ from backend.app.models.results import (
     VolatilitySmilePoint,
     VolatilitySmileResult,
 )
-from backend.app.models.simulation import RandomEngine, SimulationConfig, VarianceReduction
+from backend.app.models.simulation import (
+    PathSimulationConfig,
+    RandomEngine,
+    SimulationConfig,
+    VarianceReduction,
+)
 from backend.app.models.volatility import (
     ImpliedVolatilityConfig,
     ImpliedVolatilityMarket,
@@ -112,6 +133,21 @@ from backend.app.models.volatility_surface import (
 )
 
 __all__ = [
+    "BasisFamily",
+    "LongstaffSchwartzConfig",
+    "LongstaffSchwartzResult",
+    "LSMBasisComparisonResult",
+    "LSMBoundaryComparisonPoint",
+    "LSMBoundaryPoint",
+    "LSMComparison",
+    "LSMConvergenceMode",
+    "LSMConvergenceResult",
+    "LSMEvaluationMode",
+    "LSMPolicy",
+    "LSMRegressionDiagnostic",
+    "LSMResearchPoint",
+    "PathSimulationConfig",
+    "RegressionFallback",
     "ATMMaturityPoint",
     "ATMTermStructureResult",
     "AnalyticalGreeksResult",

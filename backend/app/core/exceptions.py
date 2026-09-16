@@ -9,6 +9,10 @@ class NumericalError(QuantitativeError):
     """Raised when valid model inputs exceed safe numerical representation."""
 
 
+class LongstaffSchwartzError(QuantitativeError):
+    """Raised for invalid paths, policies, or LSM experiments."""
+
+
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
 

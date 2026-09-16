@@ -11,6 +11,8 @@ from backend.app.api.analytics import router as analytics_router
 from backend.app.api.binomial import analytics_router as binomial_analytics_router
 from backend.app.api.binomial import pricing_router as binomial_pricing_router
 from backend.app.api.greeks import router as greeks_router
+from backend.app.api.longstaff_schwartz import analytics_router as lsm_analytics_router
+from backend.app.api.longstaff_schwartz import pricing_router as lsm_pricing_router
 from backend.app.api.market_data import router as market_data_router
 from backend.app.api.options_analytics import router as options_analytics_router
 from backend.app.api.pricing import router as pricing_router
@@ -41,7 +43,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.8.0",
+    version="0.9.0",
     description=(
         "European and American option research with analytical, Monte Carlo, and CRR pricing"
     ),
@@ -57,6 +59,8 @@ app.include_router(options_analytics_router)
 app.include_router(volatility_surface_router)
 app.include_router(binomial_pricing_router)
 app.include_router(binomial_analytics_router)
+app.include_router(lsm_pricing_router)
+app.include_router(lsm_analytics_router)
 
 
 @app.exception_handler(ProviderError)

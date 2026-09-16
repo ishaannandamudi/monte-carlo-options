@@ -1,7 +1,7 @@
 """Explicit simulation behavior and random-engine configuration."""
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,3 +49,18 @@ class SimulationConfig(BaseModel):
     random_engine: RandomEngine = RandomEngine.PCG64
     confidence_level: ConfidenceLevel = 0.95
     batch_size: PositiveInt | None = None
+
+
+class PathSimulationConfig(BaseModel):
+    """Exact GBM path sampling; adjacent rows are antithetic partners when selected."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    num_simulations: PositiveInt = 25_000
+    num_time_steps: PositiveInt = 50
+    seed: NonNegativeInt = 42
+    variance_reduction: Literal[VarianceReduction.NONE, VarianceReduction.ANTITHETIC] = (
+        VarianceReduction.ANTITHETIC
+    )
+    random_engine: RandomEngine = RandomEngine.PCG64
+    confidence_level: ConfidenceLevel = 0.95

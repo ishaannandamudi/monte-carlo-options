@@ -6,15 +6,43 @@ import numpy as np
 from numpy.random import Generator
 from numpy.typing import NDArray
 
+from backend.app.core.exceptions import NumericalError
 from backend.app.core.numerics import finite_array_exp, finite_exp, require_finite
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.option import OptionContract
-from backend.app.models.simulation import SimulationConfig
-from backend.app.simulation.base import StochasticProcess
+from backend.app.models.simulation import PathSimulationConfig, SimulationConfig
+from backend.app.simulation.base import PathStochasticProcess, StochasticProcess
 
 
-class GBMProcess(StochasticProcess):
-    """Terminal-only risk-neutral GBM process with vectorized normal sampling."""
+class GBMProcess(StochasticProcess, PathStochasticProcess):
+    """Exact risk-neutral GBM terminal and full-path simulation."""
+
+    def simulate_paths(
+        self,
+        contract: OptionContract,
+        market: MarketEnvironment,
+        config: PathSimulationConfig,
+        rng: Generator,
+    ) -> NDArray[np.float64]:
+        """Simulate exact transitions with interleaved antithetic path rows."""
+
+        count, steps = config.num_simulations, config.num_time_steps
+        if contract.maturity_years == 0.0:
+            return np.full((count, steps + 1), contract.spot, dtype=np.float64)
+        if market.volatility == 0.0:
+            times = np.linspace(0.0, contract.maturity_years, steps + 1, dtype=np.float64)
+            path = contract.spot * finite_array_exp(
+                (market.risk_free_rate - market.dividend_yield) * times,
+                context="deterministic GBM path",
+            )
+            require_finite(path, context="deterministic GBM path")
+            if np.any(path <= 0.0):
+                raise NumericalError("deterministic GBM path is outside positive finite range")
+            return np.broadcast_to(path, (count, steps + 1)).copy()
+        normals = path_normal_drivers(
+            count, steps, rng, antithetic=config.variance_reduction.uses_antithetic
+        )
+        return paths_from_normals(contract, market, normals)
 
     def simulate_terminal(
         self,
@@ -137,3 +165,51 @@ def theoretical_terminal_mean(
 
         raise NumericalError("GBM theoretical mean overflowed floating-point range")
     return result
+
+
+def path_normal_drivers(
+    count: int, steps: int, rng: Generator, *, antithetic: bool
+) -> NDArray[np.float64]:
+    """Generate row-wise normal vectors; an odd final row is an independent singleton."""
+
+    if count <= 0 or steps <= 0:
+        raise ValueError("path count and time steps must be positive")
+    if not antithetic:
+        return np.asarray(rng.standard_normal((count, steps)), dtype=np.float64)
+    pairs, remainder = divmod(count, 2)
+    primary = rng.standard_normal((pairs + remainder, steps))
+    normals = np.empty((count, steps), dtype=np.float64)
+    normals[: 2 * pairs : 2] = primary[:pairs]
+    normals[1 : 2 * pairs : 2] = -primary[:pairs]
+    if remainder:
+        normals[-1] = primary[-1]
+    return normals
+
+
+def paths_from_normals(
+    contract: OptionContract, market: MarketEnvironment, normals: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Evaluate exact log-GBM increments from a caller-owned (paths, steps) matrix."""
+
+    if normals.ndim != 2 or min(normals.shape) == 0:
+        raise ValueError("path drivers must be a nonempty two-dimensional matrix")
+    require_finite(normals, context="GBM path normal drivers")
+    count, steps = normals.shape
+    if contract.maturity_years == 0.0:
+        return np.full((count, steps + 1), contract.spot, dtype=np.float64)
+    dt = contract.maturity_years / steps
+    if contract.maturity_years > 0.0 and dt == 0.0:
+        raise NumericalError("GBM path time step underflowed")
+    paths = np.empty((count, steps + 1), dtype=np.float64)
+    paths[:, 0] = contract.spot
+    with np.errstate(over="ignore", invalid="ignore"):
+        increments = market.volatility * math.sqrt(dt) * normals
+        increments += (
+            market.risk_free_rate
+            - market.dividend_yield
+            - 0.5 * market.volatility * market.volatility
+        ) * dt
+        np.cumsum(increments, axis=1, out=increments)
+        increments += math.log(contract.spot)
+    paths[:, 1:] = finite_array_exp(increments, context="GBM path prices")
+    return paths
