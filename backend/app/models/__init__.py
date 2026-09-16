@@ -1,5 +1,18 @@
 """Validated domain and result models."""
 
+from backend.app.models.asian import (
+    AsianComparisonPoint,
+    AsianComparisonResult,
+    AsianConvergenceMode,
+    AsianConvergencePoint,
+    AsianConvergenceResult,
+    AsianOptionContract,
+    AsianPricingResult,
+    AsianSimulationConfig,
+    AsianVarianceReduction,
+    AveragingType,
+    GeometricAsianAnalyticalResult,
+)
 from backend.app.models.binomial import (
     AmericanBinomialComparison,
     AmericanBinomialConvergencePoint,
@@ -20,6 +33,18 @@ from backend.app.models.binomial import (
     StepParity,
     TreeGreekComparison,
     TreeModel,
+)
+from backend.app.models.digital import (
+    DigitalAnalyticalResult,
+    DigitalComparison,
+    DigitalConvergencePoint,
+    DigitalConvergenceResult,
+    DigitalMonteCarloResult,
+    DigitalOptionContract,
+    DigitalPricingMethod,
+    DigitalSimulationConfig,
+    DigitalType,
+    DigitalVarianceReduction,
 )
 from backend.app.models.greeks import (
     DifferenceScheme,
@@ -58,6 +83,7 @@ from backend.app.models.market_data import (
     QuoteTimestampSource,
     UnderlyingQuote,
 )
+from backend.app.models.monitoring import MonitoringSchedule
 from backend.app.models.option import ExerciseStyle, OptionContract, OptionType
 from backend.app.models.results import (
     AnalyticalGreeksResult,
@@ -133,6 +159,16 @@ from backend.app.models.volatility_surface import (
 )
 
 __all__ = [
+    "AsianComparisonPoint",
+    "AsianComparisonResult",
+    "AsianConvergenceMode",
+    "AsianConvergencePoint",
+    "AsianConvergenceResult",
+    "AsianOptionContract",
+    "AsianPricingResult",
+    "AsianSimulationConfig",
+    "AsianVarianceReduction",
+    "AveragingType",
     "BasisFamily",
     "LongstaffSchwartzConfig",
     "LongstaffSchwartzResult",
@@ -168,6 +204,16 @@ __all__ = [
     "ConvergencePoint",
     "ConvergenceResult",
     "DifferenceScheme",
+    "DigitalAnalyticalResult",
+    "DigitalComparison",
+    "DigitalConvergencePoint",
+    "DigitalConvergenceResult",
+    "DigitalMonteCarloResult",
+    "DigitalOptionContract",
+    "DigitalPricingMethod",
+    "DigitalSimulationConfig",
+    "DigitalType",
+    "DigitalVarianceReduction",
     "DeterministicBoundaryCase",
     "EnrichedOptionChain",
     "EnrichedOptionQuote",
@@ -182,6 +228,7 @@ __all__ = [
     "GreekComparisonEstimate",
     "GreekComparisonResult",
     "GreekMethod",
+    "GeometricAsianAnalyticalResult",
     "ImpliedVolatilityBatchItemResult",
     "ImpliedVolatilityBatchResult",
     "ImpliedVolatilityConfig",
@@ -200,6 +247,7 @@ __all__ = [
     "MaturityInterpolationMethod",
     "MonteCarloGreeksResult",
     "MonteCarloResult",
+    "MonitoringSchedule",
     "OptionContract",
     "OptionChainSnapshot",
     "OptionChainSummary",

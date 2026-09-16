@@ -43,11 +43,18 @@ def black_scholes_d1_d2(
     volatility_time = market.volatility * math.sqrt(maturity)
     if maturity == 0.0 or market.volatility == 0.0 or volatility_time == 0.0:
         return None
+    if not math.isfinite(volatility_time):
+        raise NumericalError("Black-Scholes volatility-time product overflowed")
+    volatility_variance = market.volatility * market.volatility
+    if not math.isfinite(volatility_variance):
+        raise NumericalError("Black-Scholes volatility variance overflowed")
     log_moneyness = math.log(contract.spot) - math.log(contract.strike)
     numerator = (
         log_moneyness
-        + (market.risk_free_rate - market.dividend_yield + 0.5 * market.volatility**2) * maturity
+        + (market.risk_free_rate - market.dividend_yield + 0.5 * volatility_variance) * maturity
     )
+    if not math.isfinite(numerator):
+        raise NumericalError("Black-Scholes d-value numerator overflowed")
     d1 = numerator / volatility_time
     d2 = d1 - volatility_time
     if not math.isfinite(d1) or not math.isfinite(d2):

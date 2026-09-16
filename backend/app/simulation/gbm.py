@@ -64,17 +64,24 @@ class GBMProcess(StochasticProcess, PathStochasticProcess):
         if maturity == 0.0:
             return np.full(count, contract.spot, dtype=np.float64)
 
-        drift = (market.risk_free_rate - market.dividend_yield - 0.5 * volatility**2) * maturity
         if volatility == 0.0:
+            drift = (market.risk_free_rate - market.dividend_yield) * maturity
             growth = finite_exp(drift, context="deterministic GBM growth factor")
             deterministic_terminal = contract.spot * growth
             if not math.isfinite(deterministic_terminal) or deterministic_terminal <= 0.0:
-                from backend.app.core.exceptions import NumericalError
-
                 raise NumericalError(
                     "deterministic GBM terminal price is outside positive finite range"
                 )
             return np.full(count, deterministic_terminal, dtype=np.float64)
+
+        volatility_variance = volatility * volatility
+        if not math.isfinite(volatility_variance):
+            raise NumericalError("GBM volatility variance overflowed")
+        drift = (
+            market.risk_free_rate - market.dividend_yield - 0.5 * volatility_variance
+        ) * maturity
+        if not math.isfinite(drift):
+            raise NumericalError("GBM terminal drift overflowed")
 
         normals = standard_normal_drivers(
             count,
@@ -128,17 +135,22 @@ def terminal_prices_from_normals(
         return np.full(drivers.size, contract.spot, dtype=np.float64)
 
     volatility = market.volatility
-    drift = (market.risk_free_rate - market.dividend_yield - 0.5 * volatility**2) * maturity
     if volatility == 0.0:
+        drift = (market.risk_free_rate - market.dividend_yield) * maturity
         growth = finite_exp(drift, context="deterministic GBM growth factor")
         terminal = contract.spot * growth
         if not math.isfinite(terminal) or terminal <= 0.0:
-            from backend.app.core.exceptions import NumericalError
-
             raise NumericalError(
                 "deterministic GBM terminal price is outside positive finite range"
             )
         return np.full(drivers.size, terminal, dtype=np.float64)
+
+    volatility_variance = volatility * volatility
+    if not math.isfinite(volatility_variance):
+        raise NumericalError("GBM volatility variance overflowed")
+    drift = (market.risk_free_rate - market.dividend_yield - 0.5 * volatility_variance) * maturity
+    if not math.isfinite(drift):
+        raise NumericalError("GBM terminal drift overflowed")
 
     log_returns = drift + volatility * math.sqrt(maturity) * drivers
     terminal_values = contract.spot * finite_array_exp(
@@ -161,8 +173,6 @@ def theoretical_terminal_mean(
     )
     result = contract.spot * growth
     if not math.isfinite(result) or result <= 0.0:
-        from backend.app.core.exceptions import NumericalError
-
         raise NumericalError("GBM theoretical mean overflowed floating-point range")
     return result
 
@@ -213,3 +223,67 @@ def paths_from_normals(
         increments += math.log(contract.spot)
     paths[:, 1:] = finite_array_exp(increments, context="GBM path prices")
     return paths
+
+
+def observation_prices_from_normals(
+    spot: float,
+    market: MarketEnvironment,
+    observation_times: NDArray[np.float64],
+    normals: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Evaluate exact GBM states at arbitrary strictly positive observation times."""
+
+    times = np.asarray(observation_times, dtype=np.float64)
+    drivers = np.asarray(normals, dtype=np.float64)
+    if times.ndim != 1 or drivers.ndim != 2 or drivers.shape[1] != times.size:
+        raise ValueError("normal columns must match the one-dimensional observation-time array")
+    if drivers.shape[0] == 0:
+        raise ValueError("at least one path is required")
+    require_finite(times, context="GBM observation times")
+    require_finite(drivers, context="GBM observation normal drivers")
+    if not math.isfinite(spot) or spot <= 0.0:
+        raise ValueError("spot must be positive and finite")
+    if times.size == 0:
+        return np.empty((drivers.shape[0], 0), dtype=np.float64)
+    deltas = np.diff(np.concatenate((np.zeros(1, dtype=np.float64), times)))
+    if np.any(deltas <= 0.0):
+        raise ValueError("observation times must be strictly increasing and positive")
+
+    volatility = np.float64(market.volatility)
+    with np.errstate(over="ignore", invalid="ignore"):
+        drift_rate = np.float64(market.risk_free_rate - market.dividend_yield) - (
+            np.float64(0.5) * volatility * volatility
+        )
+        increments = volatility * np.sqrt(deltas) * drivers + drift_rate * deltas
+        np.cumsum(increments, axis=1, out=increments)
+        increments += math.log(spot)
+    require_finite(increments, context="GBM observation log prices")
+    return finite_array_exp(increments, context="GBM observation prices")
+
+
+def simulate_observation_prices(
+    spot: float,
+    market: MarketEnvironment,
+    observation_times: NDArray[np.float64],
+    count: int,
+    rng: Generator,
+    *,
+    antithetic: bool,
+) -> NDArray[np.float64]:
+    """Simulate only requested GBM observations, preserving path-pair correspondence."""
+
+    times = np.asarray(observation_times, dtype=np.float64)
+    if count <= 0:
+        raise ValueError("path count must be positive")
+    if times.ndim != 1:
+        raise ValueError("observation times must be one-dimensional")
+    if times.size == 0:
+        return np.empty((count, 0), dtype=np.float64)
+    if market.volatility == 0.0:
+        deterministic = spot * finite_array_exp(
+            (market.risk_free_rate - market.dividend_yield) * times,
+            context="deterministic GBM observations",
+        )
+        return np.broadcast_to(deterministic, (count, times.size)).copy()
+    normals = path_normal_drivers(count, times.size, rng, antithetic=antithetic)
+    return observation_prices_from_normals(spot, market, times, normals)

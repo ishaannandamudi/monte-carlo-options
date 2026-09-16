@@ -13,6 +13,10 @@ class LongstaffSchwartzError(QuantitativeError):
     """Raised for invalid paths, policies, or LSM experiments."""
 
 
+class ExoticPricingError(QuantitativeError):
+    """Raised for invalid Asian/digital pricing experiments or method combinations."""
+
+
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
 

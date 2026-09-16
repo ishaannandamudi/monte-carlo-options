@@ -8,7 +8,9 @@ volatility inversion. It also normalizes real option-market snapshots and constr
 volatility smiles and surfaces with static-arbitrage diagnostics. A memory-efficient CRR binomial
 engine prices European and American contracts, extracts early-exercise boundaries, and supplies
 native tree Greeks. Longstaff-Schwartz Monte Carlo adds full-path GBM, learned American exercise
-policies, and independent policy valuation against the CRR benchmark.
+policies, and independent policy valuation against the CRR benchmark. Phase 10 adds discretely
+monitored arithmetic and geometric Asian options, an exact geometric-Asian benchmark and control
+variate, plus analytical and Monte Carlo cash-or-nothing and asset-or-nothing digitals.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -55,11 +57,19 @@ currency-safe decimal amounts.
 - Independent training and valuation streams, plus explicit in-sample mode
 - Regression rank/fallback diagnostics, empirical stopping boundaries, and CRR comparisons
 - Path-count, exercise-grid, and basis-comparison experiments
+- Regular and explicit irregular Asian monitoring schedules with an explicit initial-spot policy
+- Exact arbitrary-time GBM observations without a hidden fine grid
+- Fixed-strike arithmetic and geometric Asian calls and puts
+- Exact discrete geometric-Asian analytical pricing and geometric control variates
+- Full-path antithetic pairing and pair-level control-variate uncertainty
+- Cash-or-nothing and asset-or-nothing digital calls and puts
+- Analytical and terminal-GBM Monte Carlo digital pricing with strict ITM equality
+- Asian method comparisons, monitoring-frequency studies, and exotic convergence experiments
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
-The current scope deliberately excludes surface fitting/repair, path-dependent options,
-non-CRR tree models, calibration, stochastic volatility,
+The current scope deliberately excludes surface fitting/repair, barrier and other path-dependent
+payoffs beyond discrete Asians, non-CRR tree models, calibration, stochastic volatility,
 local volatility, jumps, multi-asset models, portfolio risk, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
@@ -426,6 +436,57 @@ uncertainty interpretation, resource accounting, and tests.
 See [the Phase 9 validation report](benchmarks/phase9-lsm.md) for measured timings and research
 examples.
 
+## Asian and digital options
+
+An Asian contract averages a discrete set of observed GBM prices and pays at maturity. A schedule
+can generate `n` regular future times `iT/n` or hold unique explicit year fractions. Explicit times
+are sorted deterministically and must lie in `[0,T]`. The contract's
+`include_initial_spot_in_average` flag defaults to false; when true, `S_0` is included exactly once.
+At zero maturity the average is defined as `S_0`.
+
+The simulator applies exact GBM transitions over each requested time increment and stores only the
+requested observations. Memory is therefore O(paths x observations), without a hidden daily grid.
+Arithmetic and geometric averages are
+
+```text
+A_arith = (1/m) sum_i S_i
+A_geo   = exp((1/m) sum_i log(S_i)).
+```
+
+Calls pay `max(A-K,0)` and puts pay `max(K-A,0)`, discounted from maturity. Geometric averaging is
+calculated in log space. Antithetic rows use complete driver vectors `Z` and `-Z`; pair-level
+uncertainty and the weighted odd singleton policy remain unchanged.
+
+For the discrete geometric average, joint-normal GBM logs give
+
+```text
+mu_G = log(S_0) + (r-q-0.5 sigma^2) mean(t_i)
+v_G  = (sigma^2/m^2) sum_i sum_j min(t_i,t_j).
+```
+
+The resulting exact lognormal payoff expectation supplies a benchmark for geometric Asians and a
+control for arithmetic Asians. The arithmetic control uses the discounted geometric payoff and its
+known discrete analytical expectation. In the combined antithetic mode, beta and both raw and
+adjusted SEs are estimated after forming independent pair clusters. Result diagnostics expose beta,
+raw and adjusted estimates and variances, control means, and the sampled variance-reduction ratio.
+
+Digital options use strict ITM indicators: equality at strike pays zero. Cash-or-nothing analytical
+prices are `cash exp(-rT) N(d2)` for calls and `cash exp(-rT) N(-d2)` for puts. Asset-or-nothing
+prices are `S exp(-qT) N(d1)` and `S exp(-qT) N(-d1)`. Monte Carlo reuses terminal GBM with plain or
+antithetic sampling. A digital's payoff discontinuity can produce high variance near strike and
+noisy realized convergence, although its asymptotic Monte Carlo SE remains O(N^-1/2). Digital
+pathwise Greeks and smoothing are outside Phase 10.
+
+Research services compare all four arithmetic Asian variance-reduction modes, validate geometric
+and digital Monte Carlo against their analytical prices, vary path count, and vary regular Asian
+monitoring frequency. Convergence points receive independent deterministic `SeedSequence` child
+streams. A discrete monitoring-frequency study does not claim a continuous-monitoring price.
+
+See [docs/phase10-asian-digital-options.md](docs/phase10-asian-digital-options.md) for the complete
+derivations, edge-case and cluster-variance policies, memory model, and API safeguards. Measured
+research examples and opt-in timings are in
+[benchmarks/phase10-exotics.md](benchmarks/phase10-exotics.md).
+
 ## Reproducibility and convergence
 
 Every stochastic pricing call constructs an isolated `numpy.random.Generator` backed by `PCG64`.
@@ -455,14 +516,14 @@ efficiency is its reciprocal. Runtime is reported separately and is not mixed in
 
 ```text
 backend/app/
-├── analytics/     # convergence, comparisons, sensitivity grids, batches, and smiles
+├── analytics/     # convergence, comparisons, exotic experiments, grids, batches, and smiles
 ├── api/           # FastAPI request models, limits, and thin adapters
 ├── core/          # environment settings, logging, errors, numerical guards
 ├── market_data/   # provider protocol, Massive adapter, and deterministic fake
-├── models/        # contracts, Greek/volatility configs, enums, and typed results
-├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
-├── pricing/       # analytical, Monte Carlo, and O(N)-memory CRR pricing engines
-├── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
+├── models/        # vanilla/exotic contracts, schedules, configs, enums, and typed results
+├── payoffs/       # vectorized vanilla, Asian, and digital payoff helpers
+├── pricing/       # analytical, Monte Carlo, CRR, LSM, Asian, and digital engines
+├── simulation/    # terminal/full/arbitrary-time GBM, CRN, and PCG64/SeedSequence ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # quantitative benchmark and validation reports
@@ -511,6 +572,54 @@ simulation = SimulationConfig(
 
 comparison = compare_prices(contract, market, simulation)
 print(comparison.model_dump())
+```
+
+Arithmetic Asian with the discrete geometric control:
+
+```python
+from backend.app.models.asian import (
+    AsianOptionContract,
+    AsianSimulationConfig,
+    AsianVarianceReduction,
+    AveragingType,
+)
+from backend.app.models.monitoring import MonitoringSchedule
+from backend.app.pricing.asian import asian_monte_carlo_price
+
+asian = AsianOptionContract(
+    option_type=OptionType.CALL,
+    spot=100.0,
+    strike=100.0,
+    maturity_years=1.0,
+    averaging_type=AveragingType.ARITHMETIC,
+    averaging_schedule=MonitoringSchedule.regular(12),
+)
+asian_result = asian_monte_carlo_price(
+    asian,
+    market,
+    AsianSimulationConfig(
+        num_simulations=100_000,
+        seed=42,
+        variance_reduction=AsianVarianceReduction.ANTITHETIC_GEOMETRIC_CONTROL,
+    ),
+)
+```
+
+Analytical cash-or-nothing digital:
+
+```python
+from backend.app.models.digital import DigitalOptionContract, DigitalType
+from backend.app.pricing.digital import digital_analytical_price
+
+digital = DigitalOptionContract(
+    option_type=OptionType.CALL,
+    spot=100.0,
+    strike=100.0,
+    maturity_years=1.0,
+    digital_type=DigitalType.CASH_OR_NOTHING,
+    cash_payout=10.0,
+)
+digital_result = digital_analytical_price(digital, market)
 ```
 
 Analytical and pathwise Greeks:
@@ -600,6 +709,9 @@ Available endpoints:
 - `POST /api/pricing/compare`
 - `POST /api/pricing/binomial`
 - `POST /api/pricing/longstaff-schwartz`
+- `POST /api/pricing/asian`
+- `POST /api/pricing/asian/geometric-analytical`
+- `POST /api/pricing/digital`
 - `POST /api/analytics/longstaff-schwartz/compare`
 - `POST /api/analytics/longstaff-schwartz/convergence`
 - `POST /api/analytics/longstaff-schwartz/basis-comparison`
@@ -628,6 +740,10 @@ Available endpoints:
 - `POST /api/analytics/binomial/compare`
 - `POST /api/analytics/binomial/exercise-boundary`
 - `POST /api/analytics/binomial/convergence`
+- `POST /api/analytics/asian/compare`
+- `POST /api/analytics/asian/convergence`
+- `POST /api/analytics/digital/compare`
+- `POST /api/analytics/digital/convergence`
 
 Price an American put and return its same-tree European comparator and exercise summary:
 
@@ -675,6 +791,45 @@ LSM `/convergence` also
 takes `"mode":"PATH_COUNT"` and `"values":[1000,5000,10000]`, or `"mode":"TIME_STEPS"` with
 step counts. LSM `/basis-comparison` accepts `"families":["POWER","LAGUERRE"]` and
 `"degrees":[1,2,3,4]`. Regression details are optional in the pricing response.
+
+Price a regular monthly arithmetic Asian with antithetic geometric control:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/pricing/asian \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "CALL", "spot": 100.0, "strike": 100.0,
+      "maturity_years": 1.0, "averaging_type": "ARITHMETIC",
+      "averaging_schedule": {"monitoring_count": 12},
+      "include_initial_spot_in_average": false
+    },
+    "market": {"risk_free_rate": 0.05, "volatility": 0.2, "dividend_yield": 0.01},
+    "simulation": {
+      "num_simulations": 100000, "seed": 42,
+      "variance_reduction": "ANTITHETIC_GEOMETRIC_CONTROL",
+      "confidence_level": 0.95
+    }
+  }'
+```
+
+Use `averaging_type=GEOMETRIC` with `/api/pricing/asian/geometric-analytical` for the exact
+discrete benchmark. The Asian convergence endpoint accepts `mode=PATH_COUNT` or
+`mode=MONITORING_COUNT` and a positive unique `values` list.
+
+Price a cash digital analytically by posting this body to `/api/pricing/digital`. Set
+`method=MONTE_CARLO` and include a digital simulation object for stochastic pricing:
+
+```json
+{
+  "contract": {
+    "option_type": "CALL", "spot": 100.0, "strike": 100.0,
+    "maturity_years": 1.0, "digital_type": "CASH_OR_NOTHING", "cash_payout": 10.0
+  },
+  "market": {"risk_free_rate": 0.05, "volatility": 0.2, "dividend_yield": 0.01},
+  "method": "ANALYTICAL"
+}
+```
 
 The original European `/api/analytics/convergence` body replaces `simulation` with
 `simulation_counts`, `root_seed`,
@@ -746,6 +901,9 @@ MAX_LSM_TIME_STEPS=500
 MAX_LSM_TOTAL_PATH_NODES=25000000
 MAX_LSM_CONVERGENCE_POINTS=20
 MAX_LSM_DIAGNOSTIC_DATES=100
+MAX_ASIAN_MONITORING_POINTS=1000
+MAX_ASIAN_TOTAL_PATH_NODES=25000000
+MAX_EXOTIC_CONVERGENCE_POINTS=20
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -775,6 +933,11 @@ LSM's node budget sums training and valuation paths times `(steps+1)` across eve
 request. Each sample set must also fit the path ceiling. Optional diagnostic lists are capped by
 `MAX_LSM_DIAGNOSTIC_DATES`; output truncation is explicit and does not change prices.
 
+Asian limits count effective observations, including `S_0` when selected. Total path nodes include
+every method or convergence point represented by the request. Oversized regular counts are rejected
+before the service expands the schedule or allocates a path matrix. Digital Monte Carlo reuses the
+general path-count ceiling.
+
 ## Tests and quality checks
 
 ```bash
@@ -794,6 +957,11 @@ do not assume every successive step count improves.
 LSM tests include hand-constructed path matrices, exact stopping-time discounting and replacement,
 frozen-policy evaluation, training/valuation independence, pair and odd-cluster uncertainty,
 regression fallbacks, deterministic cases, and representative American comparisons with CRR.
+Phase 10 tests use hand-built Asian observation matrices, exact irregular schedules and GBM
+increments, discrete geometric moments, one-date vanilla reduction, analytical digital identities,
+direct pair/control calculations, deterministic edges, and statistically scaled analytical
+comparisons. Performance-marked cases cover 10k/100k Asian grids through 252 dates and 100k/1m
+digital paths.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -826,6 +994,11 @@ APIs, and an autouse socket guard rejects accidental network access.
 - American exercise is available on discrete CRR or LSM dates; no discrete-dividend schedule is modeled
 - LSM exercise uses a discrete simulation schedule and a polynomial continuation approximation
 - LSM SE does not include policy-training variation or exercise-grid approximation error
+- Asian options use discrete fixed-strike averaging and pay only at maturity
+- The Asian initial spot is excluded by default and included only by explicit contract policy
+- Arithmetic Asians have no analytical benchmark in this phase; geometric Asians use exact discrete moments
+- Digital strike equality pays zero under the strict ITM convention
+- Digital payoffs are discontinuous and can have relatively high Monte Carlo variance near strike
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -837,17 +1010,19 @@ analytical convention. Phase 8 does not silently replace that IV convention or a
 volatility. The CRR engine can separately price an explicitly supplied American contract. Discrete
 dividends, liquidity, transaction costs, and market microstructure are not modeled.
 
-At `T = 0`, all pricing engines return intrinsic value. At `sigma = 0`, European engines use the
-discounted deterministic terminal payoff, while the American CRR engine optimizes over its discrete
-deterministic exercise dates. Derived values outside finite floating-point range raise a quantitative
-domain error rather than returning NaN or infinity.
+At `T = 0`, vanilla and Asian contracts return intrinsic value from `S_0`; digitals apply their
+strict spot-versus-strike indicator. At `sigma = 0`, European terminal engines use the discounted
+deterministic terminal payoff, Asians use the deterministic monitored average, and the American CRR
+engine optimizes over its discrete deterministic exercise dates. Derived values outside finite
+floating-point range raise a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
-Future phases can add parametric surface fitting, quote-repair policy, full paths, additional
-variance-reduction techniques, richer stopping policies, Asian and
-barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
+Phase 11 can add barrier contracts and rebates, discrete monitoring semantics, and any chosen
+continuous-monitoring correction on the existing schedule and arbitrary-time GBM foundation.
+Later phases can add parametric surface fitting, quote-repair policy, additional
+variance-reduction techniques, richer stopping policies, correlated assets, Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
 process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
-none are implemented here.
+none are implemented in Phase 10.
