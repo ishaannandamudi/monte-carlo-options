@@ -49,6 +49,18 @@ class VolatilitySurfaceError(QuantitativeError):
     """Raised when a smile or surface cannot be constructed or queried safely."""
 
 
+class BinomialTreeError(QuantitativeError):
+    """Base class for invalid or numerically unsafe binomial trees."""
+
+
+class InvalidRiskNeutralProbabilityError(BinomialTreeError):
+    """Raised when CRR inputs do not admit a risk-neutral probability."""
+
+
+class UnsupportedExerciseStyleError(BinomialTreeError):
+    """Raised when a tree request is not European in Phase 7."""
+
+
 class ProviderError(MarketDataError):
     """Base class for translated external-provider failures."""
 

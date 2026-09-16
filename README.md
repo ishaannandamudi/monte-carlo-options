@@ -5,7 +5,8 @@ The current implementation prices European calls and puts under constant-market 
 geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
 uncertainty diagnostics, advanced variance reduction, first-class Greeks, and robust implied-
 volatility inversion. It also normalizes real option-market snapshots and constructs queryable
-volatility smiles and surfaces with static-arbitrage diagnostics.
+volatility smiles and surfaces with static-arbitrage diagnostics. A memory-efficient CRR binomial
+engine supplies a discrete-time European pricing benchmark and native tree Greeks.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -41,11 +42,15 @@ currency-safe decimal amounts.
 - OTM market quote selection, deterministic ATM/duplicate handling, and exclusion diagnostics
 - Strike-monotonicity, irregular-grid butterfly, and calendar-total-variance diagnostics
 - ATM-forward term structures and coordinate-based local skew and curvature metrics
+- Cox-Ross-Rubinstein European call and put pricing with continuous dividends
+- O(N)-memory backward induction and explicit risk-neutral probability validation
+- Tree-native Delta, Gamma, and calendar-time Theta from early lattice levels
+- CRR convergence analytics with Black-Scholes and odd/even diagnostics
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
 The current scope deliberately excludes surface fitting/repair, American option pricing,
-path-dependent options, trees, calibration, stochastic volatility, local volatility, jumps,
+path-dependent options, non-CRR tree models, calibration, stochastic volatility, local volatility, jumps,
 multi-asset models, portfolio risk, parallelism, a GPU backend, quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
@@ -316,6 +321,42 @@ curvature are centered finite differences with respect to `k`, not delta-based m
 See [docs/phase6-volatility-surfaces.md](docs/phase6-volatility-surfaces.md) for construction rules,
 query algorithms, equations, diagnostic tolerances, testing strategy, and limitations.
 
+## Cox-Ross-Rubinstein binomial trees
+
+Phase 7 prices European calls and puts on a recombining discrete-time tree. For `N` steps,
+
+```text
+dt = T/N
+u = exp(sigma sqrt(dt))
+d = 1/u
+p = [exp((r-q)dt) - d] / (u-d)
+disc = exp(-r dt)
+```
+
+The risk-neutral probability must lie in `[0,1]`. Materially invalid values are rejected rather
+than clamped; only endpoint overshoot within the configured floating-point tolerance is normalized.
+This allows negative rates, positive or negative dividends, and `q > r` whenever the CRR no-
+arbitrage condition remains valid.
+
+Terminal stock prices are indexed by their number of up moves. Existing vectorized call/put
+payoffs create the terminal value vector, then backward induction repeatedly applies
+`disc[(1-p)V_down + pV_up]`. Only one level is retained, so peak memory is O(N). Arithmetic remains
+O(N²). No early-exercise maximum is taken.
+
+Zero maturity returns intrinsic value without constructing parameters. Zero volatility uses the
+exact deterministic terminal stock `S exp((r-q)T)` and discounts its payoff; it never divides by
+the degenerate `u-d`. Native Delta comes from level one. Gamma uses the difference between level-two
+up and down Deltas, divided by average outer-node spacing. Theta compares the middle level-two node
+with the root over `2dt`, matching the calendar-time convention used by analytical Greeks.
+
+CRR values approach Black-Scholes as the number of steps grows, but strike placement commonly
+causes alternating odd/even errors. Convergence analytics retain each canonical result and expose
+neighboring-step averages only as diagnostics. They never silently replace a tree price.
+
+See [docs/phase7-binomial-trees.md](docs/phase7-binomial-trees.md) for formulas, indexing, Greeks,
+probability policy, numerical safeguards, convergence behavior, and the limited Phase 8 extension
+hook.
+
 ## Reproducibility and convergence
 
 Every pricing call constructs an isolated `numpy.random.Generator` backed explicitly by `PCG64`.
@@ -351,7 +392,7 @@ backend/app/
 ├── market_data/   # provider protocol, Massive adapter, and deterministic fake
 ├── models/        # contracts, Greek/volatility configs, enums, and typed results
 ├── payoffs/       # vectorized vanilla payoff and intrinsic value helpers
-├── pricing/       # prices, Greeks, IV inversion, comparisons, and transformations
+├── pricing/       # analytical, Monte Carlo, and O(N)-memory CRR pricing engines
 ├── simulation/    # GBM, reusable CRN drivers, and PCG64/SeedSequence ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
@@ -488,6 +529,7 @@ Available endpoints:
 - `POST /api/pricing/monte-carlo`
 - `POST /api/pricing/black-scholes`
 - `POST /api/pricing/compare`
+- `POST /api/pricing/binomial`
 - `POST /api/analytics/convergence`
 - `POST /api/analytics/variance-reduction`
 - `POST /api/greeks/black-scholes`
@@ -510,6 +552,8 @@ Available endpoints:
 - `POST /api/analytics/volatility/surface/query`
 - `POST /api/analytics/volatility/surface/diagnostics`
 - `POST /api/analytics/volatility/surface/atm-term-structure`
+- `POST /api/analytics/binomial/compare`
+- `POST /api/analytics/binomial/convergence`
 
 The convergence body replaces `simulation` with `simulation_counts`, `root_seed`,
 `variance_reduction`, and `confidence_level`. Generated OpenAPI documentation is available at
@@ -573,6 +617,8 @@ MAX_SMILE_POINTS=500
 MAX_SURFACE_SMILES=100
 MAX_SURFACE_QUERY_POINTS=1000
 MAX_DIAGNOSTIC_GRID_POINTS=10000
+MAX_BINOMIAL_STEPS=10000
+MAX_BINOMIAL_CONVERGENCE_POINTS=20
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -610,6 +656,8 @@ zero uncertainty; deterministic cases remain exact.
 The normal suite uses fixed seeds, moderate sample sizes, analytical identities, deterministic edge
 cases, theoretical GBM moments, direct pair/control/CRN calculations, analytical Greek identities,
 and statistically scaled Monte Carlo tolerances such as `abs(estimate - benchmark) <= k * SE`.
+Binomial tests directly reproduce one- and two-step lattices, then use Black-Scholes and analytical
+Greeks as convergence references without assuming every successive step count improves.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -637,6 +685,9 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Surface log-moneyness uses the maturity-specific forward under those flat carry assumptions
 - Default surface queries do not extrapolate beyond observed strike or maturity support
 - Local skew and curvature are derivatives with respect to log-forward-moneyness
+- Binomial pricing uses only CRR, European exercise, and constant per-tree market assumptions
+- CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
+- Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
 - No settlement, exercise, or instrument taxonomy beyond reported provider metadata is inferred
 
@@ -646,14 +697,14 @@ convention until an American pricer exists. The enriched result marks this appro
 exercise value, discrete dividends, liquidity, transaction costs, and market microstructure are not
 modeled.
 
-At `T = 0`, both engines return intrinsic value. At `sigma = 0`, both use the discounted
+At `T = 0`, all pricing engines return intrinsic value. At `sigma = 0`, all use the discounted
 deterministic risk-neutral terminal payoff. Derived values outside finite floating-point range raise
 a quantitative domain error rather than returning NaN or infinity.
 
 ## Roadmap
 
 Future phases can add parametric surface fitting, quote-repair policy, full paths, additional
-variance-reduction techniques, binomial trees, American exercise and Longstaff-Schwartz, Asian and
+variance-reduction techniques, American exercise and Longstaff-Schwartz, Asian and
 barrier payoffs, correlated assets, Heston volatility and calibration, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
