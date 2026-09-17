@@ -21,6 +21,10 @@ class BarrierPricingError(ExoticPricingError):
     """Raised for unsupported or numerically invalid barrier pricing operations."""
 
 
+class MultiAssetPricingError(ExoticPricingError):
+    """Raised for invalid correlation, simulation, or basket pricing operations."""
+
+
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
 

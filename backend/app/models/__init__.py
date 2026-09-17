@@ -31,6 +31,22 @@ from backend.app.models.barrier import (
     BarrierVarianceReduction,
     RebateTiming,
 )
+from backend.app.models.basket import (
+    BasketComparisonPoint,
+    BasketComparisonResult,
+    BasketConvergencePoint,
+    BasketConvergenceResult,
+    BasketOptionContract,
+    BasketPricingResult,
+    BasketSimulationConfig,
+    BasketType,
+    BasketVarianceReduction,
+    CorrelationSensitivityPoint,
+    CorrelationSensitivityResult,
+    GeometricBasketAnalyticalResult,
+    WeightSensitivityPoint,
+    WeightSensitivityResult,
+)
 from backend.app.models.binomial import (
     AmericanBinomialComparison,
     AmericanBinomialConvergencePoint,
@@ -102,6 +118,12 @@ from backend.app.models.market_data import (
     UnderlyingQuote,
 )
 from backend.app.models.monitoring import MonitoringSchedule
+from backend.app.models.multi_asset import (
+    CorrelationDiagnosticConfig,
+    CorrelationFactorizationDiagnostics,
+    EmpiricalCorrelationResult,
+    MultiAssetMarketEnvironment,
+)
 from backend.app.models.option import ExerciseStyle, OptionContract, OptionType
 from backend.app.models.results import (
     AnalyticalGreeksResult,
@@ -202,6 +224,15 @@ __all__ = [
     "BarrierSimulationConfig",
     "BarrierStyle",
     "BarrierVarianceReduction",
+    "BasketComparisonPoint",
+    "BasketComparisonResult",
+    "BasketConvergencePoint",
+    "BasketConvergenceResult",
+    "BasketOptionContract",
+    "BasketPricingResult",
+    "BasketSimulationConfig",
+    "BasketType",
+    "BasketVarianceReduction",
     "BasisFamily",
     "LongstaffSchwartzConfig",
     "LongstaffSchwartzResult",
@@ -237,6 +268,10 @@ __all__ = [
     "CRRParameters",
     "ConvergencePoint",
     "ConvergenceResult",
+    "CorrelationDiagnosticConfig",
+    "CorrelationFactorizationDiagnostics",
+    "CorrelationSensitivityPoint",
+    "CorrelationSensitivityResult",
     "DifferenceScheme",
     "DigitalAnalyticalResult",
     "DigitalComparison",
@@ -255,6 +290,7 @@ __all__ = [
     "ExerciseBoundaryPoint",
     "ExerciseBoundaryResult",
     "ExerciseRegionDirection",
+    "EmpiricalCorrelationResult",
     "ExtrapolationPolicy",
     "FiniteDifferenceGreekResult",
     "Greek",
@@ -263,6 +299,7 @@ __all__ = [
     "GreekComparisonResult",
     "GreekMethod",
     "GeometricAsianAnalyticalResult",
+    "GeometricBasketAnalyticalResult",
     "ImpliedVolatilityBatchItemResult",
     "ImpliedVolatilityBatchResult",
     "ImpliedVolatilityConfig",
@@ -278,6 +315,7 @@ __all__ = [
     "MarketPriceSource",
     "MarketSmilePoint",
     "MarketSmileResult",
+    "MultiAssetMarketEnvironment",
     "MaturityInterpolationMethod",
     "MonteCarloGreeksResult",
     "MonteCarloResult",
@@ -331,5 +369,7 @@ __all__ = [
     "VolatilityPointQuality",
     "VolatilitySmile",
     "VolatilitySurface",
+    "WeightSensitivityPoint",
+    "WeightSensitivityResult",
     "UnderlyingQuote",
 ]

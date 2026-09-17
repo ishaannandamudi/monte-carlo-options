@@ -33,6 +33,10 @@ class Settings(BaseModel):
     max_barrier_monitoring_points: int = Field(default=5_000, gt=0)
     max_barrier_total_path_nodes: int = Field(default=25_000_000, gt=0)
     max_barrier_convergence_points: int = Field(default=20, gt=0)
+    max_multi_asset_count: int = Field(default=100, gt=0)
+    max_multi_asset_path_nodes: int = Field(default=25_000_000, gt=0)
+    max_basket_convergence_points: int = Field(default=20, gt=0)
+    max_basket_sensitivity_points: int = Field(default=50, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -58,6 +62,10 @@ class Settings(BaseModel):
             "max_barrier_monitoring_points",
             "max_barrier_total_path_nodes",
             "max_barrier_convergence_points",
+            "max_multi_asset_count",
+            "max_multi_asset_path_nodes",
+            "max_basket_convergence_points",
+            "max_basket_sensitivity_points",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value

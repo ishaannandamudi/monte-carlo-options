@@ -11,6 +11,7 @@ from backend.app.payoffs.barrier import (
     discrete_discounted_barrier_payoffs,
     evaluate_discrete_barrier,
 )
+from backend.app.payoffs.basket import basket_payoff, basket_payoff_from_values, basket_values
 from backend.app.payoffs.digital import digital_itm, digital_payoff
 from backend.app.payoffs.vanilla import call_payoff, intrinsic_value, put_payoff, vanilla_payoff
 
@@ -21,6 +22,9 @@ __all__ = [
     "BarrierEventEvaluation",
     "barrier_breaches",
     "barrier_vanilla_payoff",
+    "basket_payoff",
+    "basket_payoff_from_values",
+    "basket_values",
     "bridge_discounted_barrier_payoffs",
     "brownian_bridge_crossing_probabilities",
     "brownian_bridge_survival_probabilities",

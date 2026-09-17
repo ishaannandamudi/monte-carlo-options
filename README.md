@@ -13,6 +13,8 @@ monitored arithmetic and geometric Asian options, an exact geometric-Asian bench
 variate, plus analytical and Monte Carlo cash-or-nothing and asset-or-nothing digitals. Phase 11
 adds single-barrier calls and puts with discrete monitoring, Brownian-bridge continuous correction,
 rebates, hit diagnostics, continuous analytical benchmarks, and knock-in/out parity analytics.
+Phase 12 adds correlated multi-asset GBM, robust correlation factorization, and weighted arithmetic
+and geometric European basket options with an exact geometric benchmark and control variate.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -75,12 +77,19 @@ currency-safe decimal amounts.
 - All eight zero-rebate continuously monitored single-barrier analytical formulas
 - Pathwise discrete/bridge knock-in plus knock-out parity diagnostics
 - Barrier path-count, monitoring-frequency, and level-sensitivity analytics
+- Validated Gaussian correlation matrices with tiny-noise PSD repair diagnostics
+- Cholesky correlation factors with an eigen fallback for singular PSD matrices
+- Correlated terminal and arbitrary-time full-path GBM for any supported asset count
+- Weighted arithmetic and geometric European basket calls and puts
+- Exact lognormal geometric-basket pricing and a geometric payoff control for arithmetic baskets
+- Multivariate antithetic paths with pair-cluster and odd-singleton uncertainty
+- Empirical correlation, basket convergence, correlation, and two-asset weight diagnostics
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
 The current scope deliberately excludes surface fitting/repair, double/multi-asset barriers and
-path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, calibration, stochastic volatility,
-local volatility, jumps, multi-asset models, portfolio risk, parallelism, a GPU backend,
+path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, calibration,
+stochastic volatility, local volatility, jumps, portfolio risk, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
@@ -541,6 +550,43 @@ Bridge survival uses O(paths) extra workspace. See
 parity, deterministic policies, and API safeguards. Measurements are in
 [benchmarks/phase11-barriers.md](benchmarks/phase11-barriers.md).
 
+## Correlated multi-asset GBM and basket options
+
+`MultiAssetMarketEnvironment` keeps per-asset spots, dividend yields, volatilities, and optional
+identifiers separate from the basket contract. Its correlation matrix must be finite, symmetric,
+unit diagonal, bounded by one, and positive semidefinite. Eigenvalues below `-1e-10` are rejected.
+Tiny negative eigenvalues through floating-point noise are clipped, the matrix is reconstructed and
+renormalized, and the repair and Frobenius adjustment are exposed in diagnostics.
+
+Positive-definite matrices use Cholesky; singular PSD matrices, including perfect correlation, use
+a symmetric eigen factor. Independent PCG64 normal row vectors are transformed with `Z=epsilon
+L^T`. Terminal simulation returns `(paths, assets)`. Full arbitrary-time paths return `(paths,
+time_points, assets)`, including the initial state, and apply exact GBM transitions over each actual
+time increment. Antithetic vectors are formed as `epsilon,-epsilon` before correlation.
+
+Basket weights are nonnegative, sum to one within `1e-10`, and are normalized exactly after
+validation. Arithmetic values are `sum(w_i S_i)`; geometric values use `exp(sum(w_i log S_i))`.
+For a geometric basket,
+
+```text
+mu_G = sum_i w_i [log S_i(0) + (r-q_i-0.5 sigma_i^2)T]
+v_G  = T sum_i sum_j w_i w_j sigma_i sigma_j rho_ij.
+```
+
+The analytical engine prices calls and puts directly from this lognormal distribution. It does not
+treat the basket as a fictitious traded asset. Arithmetic Monte Carlo supports plain, antithetic,
+geometric-control, and combined estimators. The control is the discounted geometric payoff whose
+known expectation is the exact geometric price. Combined sampling estimates beta and SE after both
+payoffs have been reduced to identical independent antithetic clusters.
+
+Sensitivity services use Common Random Numbers for equicorrelation scenarios and two-asset weight
+sweeps. Path-count convergence uses independent deterministic `SeedSequence` children and fits the
+positive-SE points in log space. Terminal state memory is `O(paths * assets)`; dense factor
+application costs `O(paths * assets^2)` and factorization costs `O(assets^3)`. See
+[docs/phase12-multi-asset-baskets.md](docs/phase12-multi-asset-baskets.md) for formulas, tolerances,
+shape conventions, and Phase 13 boundaries. Opt-in measurements are in
+[benchmarks/phase12-multi-asset-baskets.md](benchmarks/phase12-multi-asset-baskets.md).
+
 ## Reproducibility and convergence
 
 Every stochastic pricing call constructs an isolated `numpy.random.Generator` backed by `PCG64`.
@@ -575,9 +621,9 @@ backend/app/
 ├── core/          # environment settings, logging, errors, numerical guards
 ├── market_data/   # provider protocol, Massive adapter, and deterministic fake
 ├── models/        # vanilla/exotic contracts, schedules, configs, enums, and typed results
-├── payoffs/       # vectorized vanilla, Asian, and digital payoff helpers
-├── pricing/       # analytical, Monte Carlo, CRR, LSM, Asian, and digital engines
-├── simulation/    # terminal/full/arbitrary-time GBM, CRN, and PCG64/SeedSequence ownership
+├── payoffs/       # vectorized vanilla, path-dependent, digital, barrier, and basket payoffs
+├── pricing/       # analytical, Monte Carlo, tree, LSM, exotic, and basket engines
+├── simulation/    # single/multi-asset GBM, correlation factors, CRN, and RNG ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # quantitative benchmark and validation reports
@@ -798,6 +844,8 @@ Available endpoints:
 - `POST /api/pricing/digital`
 - `POST /api/pricing/barrier`
 - `POST /api/pricing/barrier/analytical`
+- `POST /api/pricing/basket`
+- `POST /api/pricing/basket/geometric-analytical`
 - `POST /api/analytics/longstaff-schwartz/compare`
 - `POST /api/analytics/longstaff-schwartz/convergence`
 - `POST /api/analytics/longstaff-schwartz/basis-comparison`
@@ -834,6 +882,33 @@ Available endpoints:
 - `POST /api/analytics/barrier/convergence`
 - `POST /api/analytics/barrier/parity`
 - `POST /api/analytics/barrier/sensitivity`
+- `POST /api/analytics/basket/compare`
+- `POST /api/analytics/basket/convergence`
+- `POST /api/analytics/basket/correlation-sensitivity`
+- `POST /api/analytics/basket/weight-sensitivity`
+- `POST /api/analytics/multi-asset/correlation`
+
+Price an arithmetic two-asset basket with the analytical geometric payoff as a control:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/pricing/basket \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "CALL", "strike": 100, "maturity_years": 1,
+      "weights": [0.5, 0.5], "basket_type": "ARITHMETIC"
+    },
+    "market": {
+      "spots": [100, 95], "risk_free_rate": 0.03,
+      "dividend_yields": [0.01, 0.02], "volatilities": [0.2, 0.25],
+      "correlation_matrix": [[1, 0.4], [0.4, 1]], "asset_ids": ["A", "B"]
+    },
+    "simulation": {
+      "num_simulations": 100000, "seed": 42,
+      "variance_reduction": "ANTITHETIC_GEOMETRIC_CONTROL"
+    }
+  }'
+```
 
 Price an American put and return its same-tree European comparator and exercise summary:
 
@@ -1021,6 +1096,10 @@ MAX_EXOTIC_CONVERGENCE_POINTS=20
 MAX_BARRIER_MONITORING_POINTS=5000
 MAX_BARRIER_TOTAL_PATH_NODES=25000000
 MAX_BARRIER_CONVERGENCE_POINTS=20
+MAX_MULTI_ASSET_COUNT=100
+MAX_MULTI_ASSET_PATH_NODES=25000000
+MAX_BASKET_CONVERGENCE_POINTS=20
+MAX_BASKET_SENSITIVITY_POINTS=50
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -1059,6 +1138,11 @@ Barrier limits count mandatory time zero, scheduled observations, a payoff-only 
 needed, and every pricing/parity run represented by an analytics request. The 25-million-node
 default admits 100k×52 and is close to 100k×252, while rejecting 100k×1000 before allocation.
 
+Multi-asset limits count every path-asset terminal node across all comparison, convergence, or
+sensitivity runs. The asset limit also applies to analytical and correlation-diagnostic requests.
+Basket terminal pricing does not allocate time steps; full-path multi-asset simulation remains a
+library research primitive.
+
 ## Tests and quality checks
 
 ```bash
@@ -1088,6 +1172,12 @@ IN/OUT parity, manual bridge probabilities, irregular intervals, continuous anal
 deterministic crossing times, antithetic clusters, monitoring bias, resource limits, and every new
 HTTP endpoint. Barrier performance tests cover 10k×52, 100k×52, and 100k×252; 100k×1000 is gated
 behind an explicit environment opt-in because the state matrix alone is about 800.8 MB.
+Phase 12 tests cover matrix shape/symmetry/diagonal/PSD rules, tiny repair, Cholesky and singular
+eigen factors, empirical correlations, terminal moments, exact arbitrary-time paths, multivariate
+antithetic pairing, fixed basket payoffs, single-asset and perfect-correlation reductions,
+geometric analytical/Monte Carlo agreement, all four arithmetic estimators, pair-level controls,
+sensitivities, convergence, serialization, and work limits. Performance cases cover terminal
+100k×2, 100k×10, 100k×50, 1m×2, factorization through 100 assets, and a 10k×50×5 path cube.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1130,6 +1220,11 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Bridge survival weighting supports expiry rebates but rejects positive hit-time rebates
 - Continuous barrier formulas support zero rebate; bridge hit-time moments are unavailable
 - Barrier Greeks, double barriers, and stochastic-volatility bridge corrections are not implemented
+- Basket weights are nonnegative and normalized; signed spread portfolios are not modeled
+- Cross-asset dependence is a constant Gaussian correlation matrix
+- Basket Deltas, per-asset Vegas, cross-Gammas, and correlation Greeks are deferred
+- Correlation sensitivity is an equicorrelation scenario diagnostic, not a claimed exact Greek
+- Terminal basket pricing is European; basket barriers and basket Asians are not implemented
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1141,8 +1236,9 @@ analytical convention. Phase 8 does not silently replace that IV convention or a
 volatility. The CRR engine can separately price an explicitly supplied American contract. Discrete
 dividends, liquidity, transaction costs, and market microstructure are not modeled.
 
-At `T = 0`, vanilla and Asian contracts return intrinsic value from `S_0`; digitals apply their
-strict spot-versus-strike indicator; barriers apply initial hit and IN/OUT rebate semantics. At
+At `T = 0`, vanilla, Asian, and basket contracts return intrinsic value from their time-zero
+underlying value; digitals apply their strict spot-versus-strike indicator; barriers apply initial
+hit and IN/OUT rebate semantics. At
 `sigma = 0`, European terminal engines use the discounted deterministic terminal payoff, Asians use
 the deterministic monitored average, barriers evaluate scheduled or exact continuous crossings,
 and the American CRR engine optimizes over its discrete deterministic exercise dates. Derived values
@@ -1151,11 +1247,11 @@ infinity.
 
 ## Roadmap
 
-Phase 12 can add correlated multi-asset simulation, basket payoffs, and related controls on the
-existing RNG, process, payoff, and estimator boundaries. Later phases can add parametric surface
-fitting, quote-repair policy, additional variance-reduction techniques, richer stopping policies,
-Heston volatility and calibration, jump diffusion, regime
+Phase 13 can add Heston stochastic volatility on the existing RNG, correlation-factor, process,
+payoff, and estimator boundaries. Later phases can add parametric surface fitting, quote-repair
+policy, additional variance-reduction techniques, richer stopping policies, Heston calibration,
+jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
 process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
-none are implemented in Phase 11.
+none are implemented in Phase 12.
