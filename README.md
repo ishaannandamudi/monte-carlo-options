@@ -15,6 +15,8 @@ adds single-barrier calls and puts with discrete monitoring, Brownian-bridge con
 rebates, hit diagnostics, continuous analytical benchmarks, and knock-in/out parity analytics.
 Phase 12 adds correlated multi-asset GBM, robust correlation factorization, and weighted arithmetic
 and geometric European basket options with an exact geometric benchmark and control variate.
+Phase 13 adds Heston stochastic volatility with FTE and Andersen QE-M simulation, stable
+characteristic-function pricing, model-implied smiles, and process/convergence diagnostics.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -84,12 +86,19 @@ currency-safe decimal amounts.
 - Exact lognormal geometric-basket pricing and a geometric payoff control for arithmetic baskets
 - Multivariate antithetic paths with pair-cluster and odd-singleton uncertainty
 - Empirical correlation, basket convergence, correlation, and two-asset weight diagnostics
+- Typed risk-neutral Heston parameters with non-rejecting Feller-condition diagnostics
+- Correlated spot/variance Brownian drivers and reproducible PCG64 Heston streams
+- Full-truncation Euler and martingale-corrected Andersen Quadratic-Exponential simulation
+- O(paths) Heston terminal simulation and explicit full-path research simulation
+- European Heston call/put Monte Carlo with pair-cluster antithetic uncertainty
+- Little Heston Trap characteristic function and adaptive semi-analytical Fourier pricing
+- FTE/QE comparison, path/time-step convergence, variance paths, smiles, and parameter sweeps
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
 
 The current scope deliberately excludes surface fitting/repair, double/multi-asset barriers and
-path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, calibration,
-stochastic volatility, local volatility, jumps, portfolio risk, parallelism, a GPU backend,
+path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, Heston calibration,
+local volatility, jumps, portfolio risk, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
@@ -587,6 +596,53 @@ application costs `O(paths * assets^2)` and factorization costs `O(assets^3)`. S
 shape conventions, and Phase 13 boundaries. Opt-in measurements are in
 [benchmarks/phase12-multi-asset-baskets.md](benchmarks/phase12-multi-asset-baskets.md).
 
+## Heston stochastic volatility
+
+Heston replaces constant instantaneous variance with a correlated square-root process under the
+risk-neutral measure:
+
+```text
+dS_t = (r-q)S_t dt + sqrt(v_t)S_t dW_t^S
+dv_t = kappa(theta-v_t)dt + sigma_v sqrt(v_t)dW_t^v
+corr(dW_t^S,dW_t^v) = rho.
+```
+
+`HestonParameters` stores `v0`, `kappa`, `theta`, `sigma_v`, and `rho`; supplied values are already
+risk-neutral parameters. The Feller condition `2*kappa*theta >= sigma_v^2` and its ratio are
+reported as diagnostics. Violating parameters remain valid because calibrated equity models often
+use them.
+
+The baseline Full-Truncation Euler scheme retains its raw variance update and uses `max(v,0)` in
+every coefficient. It exposes negative-proposal frequency without ever taking an invalid square
+root. The higher-quality Andersen QE implementation matches exact CIR conditional moments with a
+quadratic-Gaussian low-variance branch and a point-mass/exponential high-variance branch. Its QE-M
+log-spot update includes a conditional-MGF martingale correction. When vol-of-vol is zero, both
+schemes use the exact deterministic variance transition and integrated variance.
+
+Terminal-only pricing keeps O(paths) state. Full `(paths,steps+1)` spot and variance matrices are
+allocated only by the diagnostic simulator. Antithetic FTE paths use `(Z1,Z2)` and
+`(-Z1,-Z2)`; QE additionally uses `U` and `1-U`. SE is computed from independent pair clusters,
+including the established weighted odd singleton rule. Simulation intervals quantify sampling
+error and do not include finite-step bias.
+
+The semi-analytical engine uses the branch-consistent Little Heston Trap characteristic function.
+Segmented SciPy quadrature evaluates Heston's `P1/P2` integrals, checks the tail, and reports its
+error estimate, evaluation count, used integration bound, and runtime. Puts follow from put-call
+parity. Exact expiry returns intrinsic value, while deterministic and near-deterministic variance
+use exact integrated variance and Black-Scholes. Negative rates, continuous dividends, `kappa=0`,
+`theta=0`, `v0=0`, Feller violations, and correlations through exactly `+/-1` are covered.
+
+Research services compare FTE and QE-M with one analytical reference, vary paths with independent
+`SeedSequence` children, vary time steps with a common seed, and compare simulated variance means
+with `theta+(v0-theta)exp(-kappa*t)`. Analytical calls across strikes feed the existing implied-vol
+solver to produce a Heston smile. Negative `rho` commonly creates equity-style negative skew, and
+larger `sigma_v` commonly changes smile curvature; neither behavior is hard-coded. Sweeps of all
+five parameters are scenario analysis only. Calibration is deferred to Phase 14.
+
+See [docs/phase13-heston.md](docs/phase13-heston.md) for the formulas, branch policies, memory model,
+and API accounting. Measured timings and validation values are in
+[benchmarks/phase13-heston.md](benchmarks/phase13-heston.md).
+
 ## Reproducibility and convergence
 
 Every stochastic pricing call constructs an isolated `numpy.random.Generator` backed by `PCG64`.
@@ -622,8 +678,8 @@ backend/app/
 ├── market_data/   # provider protocol, Massive adapter, and deterministic fake
 ├── models/        # vanilla/exotic contracts, schedules, configs, enums, and typed results
 ├── payoffs/       # vectorized vanilla, path-dependent, digital, barrier, and basket payoffs
-├── pricing/       # analytical, Monte Carlo, tree, LSM, exotic, and basket engines
-├── simulation/    # single/multi-asset GBM, correlation factors, CRN, and RNG ownership
+├── pricing/       # analytical, Monte Carlo, tree, LSM, exotic, basket, and Heston engines
+├── simulation/    # GBM/Heston processes, correlation factors, CRN, and RNG ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # quantitative benchmark and validation reports
@@ -752,6 +808,32 @@ barrier_result = barrier_monte_carlo_price(
 )
 ```
 
+Heston analytical and QE-M Monte Carlo pricing:
+
+```python
+from backend.app.models.heston import (
+    HestonParameters,
+    HestonSimulationConfig,
+    HestonSimulationScheme,
+)
+from backend.app.pricing.heston import heston_monte_carlo_price
+from backend.app.pricing.heston_analytical import heston_analytical_price
+
+heston = HestonParameters(v0=0.04, kappa=2.0, theta=0.04, sigma_v=0.3, rho=-0.7)
+analytical_heston = heston_analytical_price(contract, market, heston)
+monte_carlo_heston = heston_monte_carlo_price(
+    contract,
+    market,
+    heston,
+    HestonSimulationConfig(
+        num_simulations=100_000,
+        num_time_steps=100,
+        seed=42,
+        scheme=HestonSimulationScheme.QUADRATIC_EXPONENTIAL,
+    ),
+)
+```
+
 Analytical and pathwise Greeks:
 
 ```python
@@ -846,6 +928,8 @@ Available endpoints:
 - `POST /api/pricing/barrier/analytical`
 - `POST /api/pricing/basket`
 - `POST /api/pricing/basket/geometric-analytical`
+- `POST /api/pricing/heston/monte-carlo`
+- `POST /api/pricing/heston/analytical`
 - `POST /api/analytics/longstaff-schwartz/compare`
 - `POST /api/analytics/longstaff-schwartz/convergence`
 - `POST /api/analytics/longstaff-schwartz/basis-comparison`
@@ -887,6 +971,11 @@ Available endpoints:
 - `POST /api/analytics/basket/correlation-sensitivity`
 - `POST /api/analytics/basket/weight-sensitivity`
 - `POST /api/analytics/multi-asset/correlation`
+- `POST /api/analytics/heston/compare`
+- `POST /api/analytics/heston/convergence`
+- `POST /api/analytics/heston/smile`
+- `POST /api/analytics/heston/sensitivity`
+- `POST /api/analytics/heston/variance-diagnostics`
 
 Price an arithmetic two-asset basket with the analytical geometric payoff as a control:
 
@@ -909,6 +998,31 @@ curl -X POST http://127.0.0.1:8000/api/pricing/basket \
     }
   }'
 ```
+
+Price the same European contract under Heston with QE-M:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/pricing/heston/monte-carlo \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contract": {
+      "option_type": "CALL", "exercise_style": "EUROPEAN",
+      "spot": 100, "strike": 100, "maturity_years": 1
+    },
+    "market": {"risk_free_rate": 0.02, "dividend_yield": 0.01, "volatility": 0},
+    "parameters": {"v0": 0.04, "kappa": 2, "theta": 0.04, "sigma_v": 0.3, "rho": -0.7},
+    "simulation": {
+      "num_simulations": 100000, "num_time_steps": 100, "seed": 42,
+      "scheme": "QUADRATIC_EXPONENTIAL", "antithetic": true, "confidence_level": 0.95
+    }
+  }'
+```
+
+The Heston analytical endpoint takes the same contract, market, and parameters without a
+simulation object. Convergence accepts `PATH_COUNT` or `TIME_STEP`; smile accepts a positive unique
+`strikes` grid; sensitivity accepts one parameter name and a unique `values` grid. The market
+`volatility` field is retained for compatibility with the shared Phase 1 market model and is not
+used by either Heston engine.
 
 Price an American put and return its same-tree European comparator and exercise summary:
 
@@ -1100,6 +1214,12 @@ MAX_MULTI_ASSET_COUNT=100
 MAX_MULTI_ASSET_PATH_NODES=25000000
 MAX_BASKET_CONVERGENCE_POINTS=20
 MAX_BASKET_SENSITIVITY_POINTS=50
+MAX_HESTON_PATHS=500000
+MAX_HESTON_TIME_STEPS=2000
+MAX_HESTON_TOTAL_PATH_NODES=25000000
+MAX_HESTON_CONVERGENCE_POINTS=20
+MAX_HESTON_SMILE_POINTS=200
+MAX_HESTON_SENSITIVITY_POINTS=100
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -1143,6 +1263,11 @@ sensitivity runs. The asset limit also applies to analytical and correlation-dia
 Basket terminal pricing does not allocate time steps; full-path multi-asset simulation remains a
 library research primitive.
 
+Heston limits count every requested path-step node, including both FTE and QE-M comparison runs and
+all convergence points. Smile and sensitivity limits cap analytical quadrature calls. Normal
+European pricing uses terminal-only state; variance diagnostics allocate full spot and variance
+path matrices under the same node budget.
+
 ## Tests and quality checks
 
 ```bash
@@ -1178,6 +1303,12 @@ antithetic pairing, fixed basket payoffs, single-asset and perfect-correlation r
 geometric analytical/Monte Carlo agreement, all four arithmetic estimators, pair-level controls,
 sensitivities, convergence, serialization, and work limits. Performance cases cover terminal
 100k×2, 100k×10, 100k×50, 1m×2, factorization through 100 assets, and a 10k×50×5 path cube.
+Phase 13 tests cover parameter boundaries and Feller diagnostics, empirical Brownian correlation,
+fixed FTE/QE updates, both QE moment branches, raw negative-variance handling, terminal/full-path
+reproducibility, CIR and terminal-spot means, a hard-coded Heston benchmark, Little Heston Trap
+stability, parity, the Black-Scholes limit, MC-versus-analytical agreement, antithetic cluster SE,
+smiles, every parameter sweep, convergence seeds, APIs, and allocation limits. Performance cases
+cover FTE and QE-M at 100k paths with 50, 100, and 250 steps; 500k×100 is separately opt-in.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1192,7 +1323,7 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Constant volatility
 - Constant continuously compounded risk-free rate, which may be negative
 - Constant continuous dividend yield, which may be negative
-- No jumps or stochastic volatility
+- No jumps; stochastic volatility is available only through the Phase 13 Heston model
 - No transaction costs, liquidity effects, discrete hedging, or model calibration
 - Terminal and full-path GBM simulation; LSM regression uses current stock only
 - Normal-approximation confidence intervals
@@ -1225,6 +1356,11 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Basket Deltas, per-asset Vegas, cross-Gammas, and correlation Greeks are deferred
 - Correlation sensitivity is an equicorrelation scenario diagnostic, not a claimed exact Greek
 - Terminal basket pricing is European; basket barriers and basket Asians are not implemented
+- Heston pricing supports European vanilla terminal payoffs; American and exotic Heston payoffs are absent
+- Heston uses uniform time steps; MC confidence intervals exclude FTE/QE discretization bias
+- FTE retains raw variance proposals, while QE-M uses a nonnegative moment-matched transition
+- Heston parameters are risk-neutral inputs; surface calibration is deferred to Phase 14
+- Heston assumes a CIR variance process with constant parameters, rates, and dividend yield
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1247,11 +1383,10 @@ infinity.
 
 ## Roadmap
 
-Phase 13 can add Heston stochastic volatility on the existing RNG, correlation-factor, process,
-payoff, and estimator boundaries. Later phases can add parametric surface fitting, quote-repair
-policy, additional variance-reduction techniques, richer stopping policies, Heston calibration,
-jump diffusion, regime
+Phase 14 can calibrate the Phase 13 Heston engine to observed volatility surfaces without replacing
+its simulation or analytical pricing boundaries. Later phases can add parametric surface fitting,
+quote-repair policy, additional variance-reduction techniques, richer stopping policies, jump diffusion, regime
 switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
 process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
-none are implemented in Phase 12.
+none are implemented in Phase 13.

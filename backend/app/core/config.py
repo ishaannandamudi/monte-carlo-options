@@ -37,6 +37,12 @@ class Settings(BaseModel):
     max_multi_asset_path_nodes: int = Field(default=25_000_000, gt=0)
     max_basket_convergence_points: int = Field(default=20, gt=0)
     max_basket_sensitivity_points: int = Field(default=50, gt=0)
+    max_heston_paths: int = Field(default=500_000, gt=0)
+    max_heston_time_steps: int = Field(default=2_000, gt=0)
+    max_heston_total_path_nodes: int = Field(default=25_000_000, gt=0)
+    max_heston_convergence_points: int = Field(default=20, gt=0)
+    max_heston_smile_points: int = Field(default=200, gt=0)
+    max_heston_sensitivity_points: int = Field(default=100, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -66,6 +72,12 @@ class Settings(BaseModel):
             "max_multi_asset_path_nodes",
             "max_basket_convergence_points",
             "max_basket_sensitivity_points",
+            "max_heston_paths",
+            "max_heston_time_steps",
+            "max_heston_total_path_nodes",
+            "max_heston_convergence_points",
+            "max_heston_smile_points",
+            "max_heston_sensitivity_points",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value

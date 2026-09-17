@@ -25,6 +25,10 @@ class MultiAssetPricingError(ExoticPricingError):
     """Raised for invalid correlation, simulation, or basket pricing operations."""
 
 
+class HestonPricingError(QuantitativeError):
+    """Raised for invalid or numerically unsafe Heston operations."""
+
+
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
 

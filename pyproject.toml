@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "monte-carlo-options"
-version = "0.12.0"
-description = "Reproducible quantitative foundations for single- and multi-asset option research"
+version = "0.13.0"
+description = "Reproducible quantitative foundations for option and stochastic-volatility research"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
