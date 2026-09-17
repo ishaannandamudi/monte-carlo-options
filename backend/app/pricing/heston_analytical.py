@@ -30,6 +30,32 @@ class _IntegralResult:
     upper_bound: float
 
 
+@dataclass
+class _CharacteristicCache:
+    values: dict[complex, complex]
+    hits: int = 0
+    misses: int = 0
+
+
+def _characteristic_value(
+    argument: complex,
+    contract: OptionContract,
+    market: MarketEnvironment,
+    parameters: HestonParameters,
+    cache: _CharacteristicCache | None,
+) -> complex:
+    if cache is None:
+        return heston_characteristic_function(argument, contract, market, parameters)
+    cached = cache.values.get(argument)
+    if cached is not None:
+        cache.hits += 1
+        return cached
+    value = heston_characteristic_function(argument, contract, market, parameters)
+    cache.values[argument] = value
+    cache.misses += 1
+    return value
+
+
 def deterministic_integrated_variance(parameters: HestonParameters, maturity_years: float) -> float:
     """Return integrated variance when vol-of-vol is numerically deterministic."""
 
@@ -128,18 +154,29 @@ def _probability_integrand(
     market: MarketEnvironment,
     parameters: HestonParameters,
     forward_mean: float,
+    characteristic_cache: _CharacteristicCache | None,
 ) -> float:
     if frequency <= 0.0:
         frequency = 1e-10
     phase = cmath.exp(-1j * frequency * math.log(contract.strike))
     if probability_index == 1:
         characteristic = (
-            heston_characteristic_function(complex(frequency, -1.0), contract, market, parameters)
+            _characteristic_value(
+                complex(frequency, -1.0),
+                contract,
+                market,
+                parameters,
+                characteristic_cache,
+            )
             / forward_mean
         )
     else:
-        characteristic = heston_characteristic_function(
-            complex(frequency, 0.0), contract, market, parameters
+        characteristic = _characteristic_value(
+            complex(frequency, 0.0),
+            contract,
+            market,
+            parameters,
+            characteristic_cache,
         )
     value = (phase * characteristic / (1j * frequency)).real
     if not math.isfinite(value):
@@ -154,6 +191,7 @@ def _segmented_integral(
     parameters: HestonParameters,
     config: HestonIntegrationConfig,
     forward_mean: float,
+    characteristic_cache: _CharacteristicCache | None,
 ) -> _IntegralResult:
     lower = 1e-8
     total = 0.0
@@ -168,7 +206,14 @@ def _segmented_integral(
             _probability_integrand,
             start,
             end,
-            args=(probability_index, contract, market, parameters, forward_mean),
+            args=(
+                probability_index,
+                contract,
+                market,
+                parameters,
+                forward_mean,
+                characteristic_cache,
+            ),
             epsabs=config.absolute_tolerance,
             epsrel=config.relative_tolerance,
             limit=config.quadrature_limit,
@@ -220,17 +265,17 @@ def _deterministic_variance_price(
     )
 
 
-def heston_analytical_price(
+def _heston_analytical_price(
     contract: OptionContract,
     market: MarketEnvironment,
     parameters: HestonParameters,
-    config: HestonIntegrationConfig | None = None,
+    integration: HestonIntegrationConfig,
+    characteristic_cache: _CharacteristicCache | None,
 ) -> HestonAnalyticalResult:
     """Price a European option by branch-stable Heston Fourier inversion."""
 
     require_european_exercise(contract, engine="Heston semi-analytical pricing")
     started = perf_counter()
-    integration = config or HestonIntegrationConfig()
     if contract.maturity_years == 0.0:
         return HestonAnalyticalResult(
             price=intrinsic_value(contract.option_type, contract.spot, contract.strike),
@@ -267,8 +312,24 @@ def heston_analytical_price(
         (market.risk_free_rate - market.dividend_yield) * maturity,
         context="Heston terminal spot mean",
     )
-    first = _segmented_integral(1, contract, market, parameters, integration, forward_mean)
-    second = _segmented_integral(2, contract, market, parameters, integration, forward_mean)
+    first = _segmented_integral(
+        1,
+        contract,
+        market,
+        parameters,
+        integration,
+        forward_mean,
+        characteristic_cache,
+    )
+    second = _segmented_integral(
+        2,
+        contract,
+        market,
+        parameters,
+        integration,
+        forward_mean,
+        characteristic_cache,
+    )
     probability_one = 0.5 + first.value / math.pi
     probability_two = 0.5 + second.value / math.pi
     if not (-1e-10 <= probability_one <= 1.0 + 1e-10) or not (
@@ -294,4 +355,62 @@ def heston_analytical_price(
         method=HestonAnalyticalMethod.LITTLE_TRAP_FOURIER,
         feller_satisfied=parameters.feller_satisfied,
         feller_ratio=parameters.feller_ratio,
+    )
+
+
+class HestonAnalyticalBatchPricer:
+    """Maturity-scoped analytical pricer with a safe, parameter-local CF cache."""
+
+    def __init__(
+        self,
+        *,
+        spot: float,
+        maturity_years: float,
+        market: MarketEnvironment,
+        parameters: HestonParameters,
+        config: HestonIntegrationConfig | None = None,
+    ) -> None:
+        self.spot = spot
+        self.maturity_years = maturity_years
+        self.market = market
+        self.parameters = parameters
+        self.integration = config or HestonIntegrationConfig()
+        self._cache = _CharacteristicCache(values={})
+
+    @property
+    def cache_hits(self) -> int:
+        return self._cache.hits
+
+    @property
+    def cache_misses(self) -> int:
+        return self._cache.misses
+
+    def price(self, contract: OptionContract) -> HestonAnalyticalResult:
+        if contract.spot != self.spot or contract.maturity_years != self.maturity_years:
+            raise HestonPricingError(
+                "Heston batch pricer contract must match its fixed spot and maturity"
+            )
+        return _heston_analytical_price(
+            contract,
+            self.market,
+            self.parameters,
+            self.integration,
+            self._cache,
+        )
+
+
+def heston_analytical_price(
+    contract: OptionContract,
+    market: MarketEnvironment,
+    parameters: HestonParameters,
+    config: HestonIntegrationConfig | None = None,
+) -> HestonAnalyticalResult:
+    """Price a European option by branch-stable Heston Fourier inversion."""
+
+    return _heston_analytical_price(
+        contract,
+        market,
+        parameters,
+        config or HestonIntegrationConfig(),
+        None,
     )

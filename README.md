@@ -17,6 +17,13 @@ Phase 12 adds correlated multi-asset GBM, robust correlation factorization, and 
 and geometric European basket options with an exact geometric benchmark and control variate.
 Phase 13 adds Heston stochastic volatility with FTE and Andersen QE-M simulation, stable
 characteristic-function pricing, model-implied smiles, and process/convergence diagnostics.
+Phase 14 calibrates the same risk-neutral Heston model to option prices, BSM implied volatilities,
+or total variance with bounded local/global optimization, market-data cleaning, fit diagnostics,
+identifiability analysis, stability studies, and structured holdout validation.
+Phase 15 adds a capability-aware registry and a research comparison layer across BSM, GBM Monte
+Carlo, European/American CRR, Longstaff-Schwartz, and analytical/Monte Carlo Heston. It reports
+price and Greek dispersion, equivalent IV, market fit, quote-spread diagnostics, compute frontiers,
+calibration uncertainty, theoretical consistency checks, and explicit model-risk flags.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -93,12 +100,30 @@ currency-safe decimal amounts.
 - European Heston call/put Monte Carlo with pair-cluster antithetic uncertainty
 - Little Heston Trap characteristic function and adaptive semi-analytical Fourier pricing
 - FTE/QE comparison, path/time-step convergence, variance paths, smiles, and parameter sweeps
+- Typed multi-expiry Heston calibration datasets with Phase 5 chain and Phase 6 surface conversion
+- Price, BSM implied-volatility, and total-variance calibration targets
+- Uniform, Vega, inverse-Vega, bid/ask, and custom weights with optional expiry balancing
+- OTM-side selection, quote-quality/moneyness filters, price bounds, and deterministic deduplication
+- Native bounded least-squares, differential evolution, hybrid refinement, and deterministic starts
+- Maturity-scoped characteristic-function reuse during each calibration vector evaluation
+- Warm starts, robust loss, optional Feller/prior penalties, and finite failed-evaluation penalties
+- Price/IV residual grids, expiry/moneyness loss, ATM/skew fit, and active-bound diagnostics
+- Local Jacobian rank, singular values, condition number, and optional covariance/correlation
+- Repeated-start stability and expiry/strike/wing holdout validation
 - Thin FastAPI endpoints with configurable resource limits
 - Deterministic, numerical, statistical, and API tests
+- Typed model registry with contract compatibility, objective complexity metadata, and structured
+  exclusions instead of silent engine substitution
+- Cross-model price, pairwise, reference, Greek, equivalent-IV, and median-runtime comparisons
+- Market price/IV fit with weighted and bid/ask-aware errors by expiry and moneyness
+- ATM, skew, curvature, residual-surface, and structured holdout comparisons
+- Accuracy-versus-compute frontiers in each engine's natural budget variable
+- Heston calibration-ensemble valuation dispersion and local covariance propagation
+- Input-perturbation stability, cross-engine consistency checks, and typed model-risk reports
 
-The current scope deliberately excludes surface fitting/repair, double/multi-asset barriers and
-path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, Heston calibration,
-local volatility, jumps, portfolio risk, parallelism, a GPU backend,
+The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
+and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
+jumps, cross-model comparison, portfolio risk, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
@@ -637,11 +662,106 @@ Research services compare FTE and QE-M with one analytical reference, vary paths
 with `theta+(v0-theta)exp(-kappa*t)`. Analytical calls across strikes feed the existing implied-vol
 solver to produce a Heston smile. Negative `rho` commonly creates equity-style negative skew, and
 larger `sigma_v` commonly changes smile curvature; neither behavior is hard-coded. Sweeps of all
-five parameters are scenario analysis only. Calibration is deferred to Phase 14.
+five parameters are scenario analysis only. Phase 14 calibration consumes this analytical engine;
+it does not change Phase 13 pricing semantics.
 
 See [docs/phase13-heston.md](docs/phase13-heston.md) for the formulas, branch policies, memory model,
 and API accounting. Measured timings and validation values are in
 [benchmarks/phase13-heston.md](benchmarks/phase13-heston.md).
+
+## Heston calibration
+
+Phase 14 fits the canonical native parameter vector `[v0, kappa, theta, sigma_v, rho]` inside
+explicit finite bounds. Every objective value uses the Phase 13 semi-analytical price. `PRICE`
+minimizes price differences; `IMPLIED_VOLATILITY` prices under Heston and uses the Phase 4 solver to
+compare European BSM IV; `TOTAL_VARIANCE` compares `T sigma^2`. Monte Carlo never runs inside the
+optimizer.
+
+The data layer accepts direct typed observations, converts enriched Phase 5 chains without
+rewriting their quality decisions, and flattens Phase 6 surfaces while retaining their BSM IV
+convention. It checks European price bounds, can remove stale, crossed, missing-mid, wide-spread,
+arbitrage-invalid, maturity, price, or moneyness observations, and reports every exclusion. The
+default OTM policy selects puts below forward, calls above forward, and calls at forward equality.
+Duplicates are resolved by spread, issue count, freshness, and source.
+
+Weights are normalized to mean one. `VEGA` uses floored BSM Vega squared and emphasizes liquid
+high-Vega points; `INVERSE_VEGA` uses its reciprocal; `BID_ASK` uses inverse squared floored spread;
+`CUSTOM` uses the nonnegative observation weight. Optional expiry balancing gives every retained
+maturity equal total weight before final normalization.
+
+Bounded SciPy least-squares supports linear, soft-L1, and Huber loss. Differential evolution is a
+deterministic single-process global alternative. `HYBRID` sends the global best to least-squares and
+retains the global candidate, while multi-start local calibration combines an optional user/warm
+start, a surface heuristic, and deterministic bounded random starts. Feller is never a hard
+constraint; an optional soft penalty is
+`lambda * max(sigma_v^2 - 2*kappa*theta, 0)^2`. Optional bound-scaled prior regularization is
+disabled by default.
+
+Integration and IV failures become finite penalty residuals and remain visible in failure counts.
+Results separately report raw RMSE/MAE/max error, weighted RMSE and objective, optimizer work,
+runtime, prices per second, active bounds, start summaries, per-expiry and moneyness loss, and full
+market/model residuals up to a configured payload cap. A finite-difference local Jacobian supplies
+rank, singular values, condition number, and a local covariance/correlation approximation only when
+full rank with enough observations. These diagnostics do not imply unique global identification.
+
+Fit analytics return an ordered market-versus-Heston surface, nearest-forward ATM term structure,
+and linear skew by expiry. Repeated-start stability exposes objective and parameter dispersion.
+Structured validation can hold out entire expiries, every nth strike within each expiry, or wings;
+it never defaults to a random option-by-option split.
+
+See [docs/phase14-heston-calibration.md](docs/phase14-heston-calibration.md) for the exact target,
+weight, penalty, optimizer, failure, and uncertainty definitions. Local timing and recovery results
+are in [benchmarks/phase14-heston-calibration.md](benchmarks/phase14-heston-calibration.md).
+
+## Model comparison and model risk
+
+Phase 15 registers only engines that already exist. `BLACK_SCHOLES`, `MONTE_CARLO_GBM`,
+`CRR_BINOMIAL`, `HESTON_ANALYTICAL`, and `HESTON_MONTE_CARLO` apply to European vanilla
+contracts. `CRR_AMERICAN` and `LONGSTAFF_SCHWARTZ` apply to American vanilla contracts. Heston
+engines require an explicit parameter set or a Phase 14 calibration result. Incompatible models are
+returned as structured exclusions; a numerical failure in one compatible engine remains a
+per-model failure while other results survive.
+
+Price dispersion is the population minimum, maximum, range, mean, median, and standard deviation
+of successful model prices. Relative range divides by a floored median by default, with spot or a
+successful reference price available as explicit alternatives. The reference is a convention, not
+a truth label. Pairwise matrices use `price_i - price_j`; relative entries divide by
+`max(abs(price_j), floor)`. Model dispersion is descriptive and has no confidence coverage.
+
+Available Greeks are compared without filling missing cells. BSM supplies analytical Delta, Gamma,
+Vega, calendar-time Theta, and Rho; CRR supplies native Delta, Gamma, and Theta; GBM Monte Carlo can
+use the existing common-random-number finite-difference estimators. Heston analytical comparison
+uses central spot/rate/maturity differences for Delta, Gamma, Rho, and Theta. Generic Heston Vega
+is omitted because sensitivity to `v0` or `sqrt(v0)` is not the same quantity as BSM Vega.
+
+Every valid European model price is inverted through the Phase 4 solver to an equivalent BSM IV.
+Single-contract IV residuals use the request's stated constant market volatility. Surface
+comparison uses each observed Phase 6 IV as the BSM-equivalent baseline. Heston-versus-BSM results
+therefore always expose which BSM volatility convention supplied the comparison.
+
+Market fit reuses Phase 14 filtering, quote-quality decisions, OTM/all selection, weights, expiry
+balancing, and deduplication. It reports price RMSE, MAE, weighted RMSE, maximum and median absolute
+error, signed bias, IV RMSE/MAE/max/bias, fraction inside bid/ask, and distance to the nearest edge
+when outside. Metrics are grouped by expiry and the Phase 14 signed-moneyness buckets. ATM, skew,
+and curvature use the Phase 6 `k=log(K/F)` and total-variance PCHIP convention. Structured expiry,
+strike, and wing holdouts keep training and validation metrics separate. Optional user labels group
+observations descriptively without adding automatic regime detection.
+
+Runtime is the median of configured repeated calls for one contract. Model output separately keeps
+paths, time steps, tree steps, standard error, confidence interval, and early-exercise behavior.
+Compute-frontier experiments vary paths for GBM/Heston Monte Carlo, steps for CRR, or path-time work
+for LSM and report runtime, reference error, stochastic SE/CI width, and an allocation estimate.
+No point is labeled optimal.
+
+`ModelRiskReport` keeps Monte Carlo sampling error, numerical disagreement, Heston calibration
+dispersion, cross-model dispersion, and market quote spread in distinct fields. A Heston ensemble
+propagates repeated calibration solutions into price and IV dispersion. When a Phase 14 local
+covariance matrix is supplied, `grad(V)^T Cov grad(V)` is returned as a local linear approximation,
+not a confidence interval. Configurable thresholds only create descriptive flags.
+
+See [docs/phase15-model-comparison.md](docs/phase15-model-comparison.md) for the complete capability,
+compatibility, statistical, failure, and API conventions. Representative local measurements are in
+[benchmarks/phase15-model-comparison.md](benchmarks/phase15-model-comparison.md).
 
 ## Reproducibility and convergence
 
@@ -674,6 +794,7 @@ efficiency is its reciprocal. Runtime is reported separately and is not mixed in
 backend/app/
 ├── analytics/     # convergence, comparisons, exotic experiments, grids, batches, and smiles
 ├── api/           # FastAPI request models, limits, and thin adapters
+├── calibration/   # Heston datasets, objectives, optimizers, diagnostics, and synthetic fixtures
 ├── core/          # environment settings, logging, errors, numerical guards
 ├── market_data/   # provider protocol, Massive adapter, and deterministic fake
 ├── models/        # vanilla/exotic contracts, schedules, configs, enums, and typed results
@@ -834,6 +955,33 @@ monte_carlo_heston = heston_monte_carlo_price(
 )
 ```
 
+Calibrate Heston to a deterministic price/IV dataset:
+
+```python
+from backend.app.calibration.heston import calibrate_heston
+from backend.app.calibration.synthetic import generate_synthetic_heston_dataset
+from backend.app.models.heston_calibration import (
+    HestonCalibrationConfig,
+    HestonCalibrationOptimizer,
+    HestonCalibrationTarget,
+)
+
+calibration_data = generate_synthetic_heston_dataset(
+    maturities=(0.25, 0.5, 1.0, 2.0),
+    log_moneyness=(-0.2, -0.1, 0.0, 0.1, 0.2),
+)
+calibration_result = calibrate_heston(
+    calibration_data,
+    HestonCalibrationConfig(
+        target=HestonCalibrationTarget.IMPLIED_VOLATILITY,
+        optimizer=HestonCalibrationOptimizer.LEAST_SQUARES,
+        multi_start_count=2,
+        random_seed=42,
+    ),
+)
+print(calibration_result.calibrated_parameters)
+```
+
 Analytical and pathwise Greeks:
 
 ```python
@@ -884,6 +1032,24 @@ Health check:
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+Phase 15 research routes are:
+
+```text
+GET  /api/analytics/models/registry
+POST /api/analytics/models/compare
+POST /api/analytics/models/market-fit
+POST /api/analytics/models/risk
+POST /api/analytics/models/compute-frontier
+POST /api/analytics/models/consistency
+POST /api/analytics/models/surface-comparison
+```
+
+A minimal comparison request supplies `contract`, `market`, and
+`config.selected_models`. Optional fields carry Heston parameters or a calibration result and the
+existing GBM, tree, Heston, or LSM numerical configurations. Public responses contain bounded
+lists and scalar diagnostics; simulation arrays and Heston characteristic-function values remain
+internal.
 
 Monte Carlo pricing:
 
@@ -976,6 +1142,41 @@ Available endpoints:
 - `POST /api/analytics/heston/smile`
 - `POST /api/analytics/heston/sensitivity`
 - `POST /api/analytics/heston/variance-diagnostics`
+- `POST /api/calibration/heston`
+- `POST /api/calibration/heston/surface`
+- `POST /api/analytics/heston/calibration/diagnostics`
+- `POST /api/analytics/heston/calibration/fitted-surface`
+- `POST /api/analytics/heston/calibration/stability`
+- `POST /api/analytics/heston/calibration/validate`
+
+Calibrate a small IV dataset in bounded native Heston parameter space:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/calibration/heston \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "dataset": {
+      "spot": 100.0, "risk_free_rate": 0.02, "dividend_yield": 0.01,
+      "underlying_symbol": "SYNTHETIC",
+      "observations": [
+        {"strike": 90.0, "maturity_years": 1.0, "option_type": "PUT",
+         "observed_implied_volatility": 0.24},
+        {"strike": 101.0050167, "maturity_years": 1.0, "option_type": "CALL",
+         "observed_implied_volatility": 0.20},
+        {"strike": 110.0, "maturity_years": 1.0, "option_type": "CALL",
+         "observed_implied_volatility": 0.19}
+      ]
+    },
+    "config": {
+      "target": "IMPLIED_VOLATILITY", "optimizer": "LEAST_SQUARES",
+      "multi_start_count": 2, "random_seed": 42, "max_iterations": 100
+    }
+  }'
+```
+
+Supplying a previous five-field `HestonParameters` object as `config.initial_parameters` is a warm
+start. Runtime, detailed residuals, and optimizer start summaries are outputs; no pricing paths or
+Fourier integration arrays are returned.
 
 Price an arithmetic two-asset basket with the analytical geometric payoff as a control:
 
@@ -1220,6 +1421,16 @@ MAX_HESTON_TOTAL_PATH_NODES=25000000
 MAX_HESTON_CONVERGENCE_POINTS=20
 MAX_HESTON_SMILE_POINTS=200
 MAX_HESTON_SENSITIVITY_POINTS=100
+MAX_HESTON_CALIBRATION_OBSERVATIONS=250
+MAX_HESTON_CALIBRATION_STARTS=10
+MAX_HESTON_CALIBRATION_ITERATIONS=500
+MAX_HESTON_CALIBRATION_SURFACE_POINTS=500
+MAX_HESTON_CALIBRATION_DIAGNOSTIC_POINTS=500
+MAX_MODEL_COMPARISON_MODELS=7
+MAX_MODEL_COMPARISON_OBSERVATIONS=500
+MAX_MODEL_COMPARISON_SURFACE_POINTS=1000
+MAX_MODEL_COMPARISON_EXPERIMENT_POINTS=20
+MAX_MODEL_COMPARISON_RUNTIME_REPETITIONS=10
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -1268,6 +1479,14 @@ all convergence points. Smile and sensitivity limits cap analytical quadrature c
 European pricing uses terminal-only state; variance diagnostics allocate full spot and variance
 path matrices under the same node budget.
 
+Heston calibration limits separately cap source observations, deterministic starts, optimizer
+iterations, Phase 6 surface points, and detailed residual output. Stability runs share the start
+limit. These API caps do not alter direct-library mathematics or defaults.
+
+Model-comparison limits cap requested engines, observation and surface grids, compute-frontier
+points, returned residuals, and timing repetitions. Existing engine-specific path, node, tree-step,
+and Heston limits are enforced on nested configurations before work starts.
+
 ## Tests and quality checks
 
 ```bash
@@ -1309,6 +1528,20 @@ reproducibility, CIR and terminal-spot means, a hard-coded Heston benchmark, Lit
 stability, parity, the Black-Scholes limit, MC-versus-analytical agreement, antithetic cluster SE,
 smiles, every parameter sweep, convergence seeds, APIs, and allocation limits. Performance cases
 cover FTE and QE-M at 100k paths with 50, 100, and 250 steps; 500k×100 is separately opt-in.
+Phase 14 tests cover typed datasets and bounds; all target and weighting modes; expiry balancing;
+quality, price, spread, moneyness, OTM, and duplicate policies; Phase 5/6 conversion; exact and noisy
+recovery; local, global, hybrid, multi-start, warm-start, robust-loss, Feller, regularization, and
+finite-failure behavior; active bounds; residual, expiry, moneyness, Jacobian, covariance, fitted
+surface, ATM, skew, stability, and structured holdout diagnostics; every endpoint and resource cap;
+and deterministic request replay. Opt-in cases measure objective scaling at 10/50/200 observations,
+50-observation local calibration, modest hybrid search, and a 200-point fitted surface.
+Phase 15 tests cover registry ordering and capabilities; compatibility; exact price, pairwise,
+reference, Greek, and IV dispersion; BSM/GBM, BSM/CRR, deterministic-Heston, Heston-MC, and
+American CRR/LSM comparisons; market price/IV/spread metrics; expiry, moneyness, ATM, skew, and
+curvature diagnostics; structured holdouts; compute frontiers; input and calibration stability;
+local covariance propagation; consistency flags; partial failures; every API route; deterministic
+signatures; serialization; and all new resource limits. Opt-in cases cover a repeated five-model
+contract comparison and a maturity-batched Heston surface workload.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1324,7 +1557,7 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Constant continuously compounded risk-free rate, which may be negative
 - Constant continuous dividend yield, which may be negative
 - No jumps; stochastic volatility is available only through the Phase 13 Heston model
-- No transaction costs, liquidity effects, discrete hedging, or model calibration
+- No transaction costs, executable-price guarantee, or discrete hedging
 - Terminal and full-path GBM simulation; LSM regression uses current stock only
 - Normal-approximation confidence intervals
 - Greeks use raw model units and the calendar-time Theta convention
@@ -1359,8 +1592,20 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Heston pricing supports European vanilla terminal payoffs; American and exotic Heston payoffs are absent
 - Heston uses uniform time steps; MC confidence intervals exclude FTE/QE discretization bias
 - FTE retains raw variance proposals, while QE-M uses a nonnegative moment-matched transition
-- Heston parameters are risk-neutral inputs; surface calibration is deferred to Phase 14
+- Heston calibration estimates risk-neutral parameters from European research prices or BSM IVs
+- Calibration assumes one flat risk-free rate and dividend yield for the complete input dataset
+- Heston parameters can be weakly identified even when model prices fit closely
+- Calibration covariance is a local linear approximation, not posterior or model-risk uncertainty
+- Weights, filters, robust loss, bounds, and penalties define different estimation problems
 - Heston assumes a CIR variance process with constant parameters, rates, and dividend yield
+- Cross-model dispersion depends on the explicitly selected engines and is not a probability law
+- A comparison reference model is a reporting convention and is not presumed correct
+- Equivalent implied volatility is a BSM representation of price, not a claim that the source model
+  has constant volatility
+- Market-fit results inherit the selected quote, filter, weighting, and carry assumptions
+- Runtime measurements depend on the host and are descriptive medians rather than service guarantees
+- Heston covariance propagation is local and linear; ensemble dispersion depends on supplied fits
+- Model-risk flags are threshold diagnostics, not ratings or automated model approvals
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1383,10 +1628,10 @@ infinity.
 
 ## Roadmap
 
-Phase 14 can calibrate the Phase 13 Heston engine to observed volatility surfaces without replacing
-its simulation or analytical pricing boundaries. Later phases can add parametric surface fitting,
-quote-repair policy, additional variance-reduction techniques, richer stopping policies, jump diffusion, regime
-switching, portfolio aggregation and risk, performance work, quasi-Monte Carlo, and eventually an
+Phase 16 can consume Phase 15's explicit price, Greek, calibration, numerical, and market-spread
+uncertainty categories when adding portfolio aggregation and risk. Later phases can add parametric
+surface fitting, quote-repair policy, additional variance-reduction techniques, richer stopping
+policies, jump diffusion, regime switching, performance work, quasi-Monte Carlo, and eventually an
 interactive dashboard. Those features are architectural consumers of the existing contract,
 process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
-none are implemented in Phase 13.
+none are implemented in Phase 15.

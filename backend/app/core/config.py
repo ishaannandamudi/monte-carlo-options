@@ -43,6 +43,16 @@ class Settings(BaseModel):
     max_heston_convergence_points: int = Field(default=20, gt=0)
     max_heston_smile_points: int = Field(default=200, gt=0)
     max_heston_sensitivity_points: int = Field(default=100, gt=0)
+    max_heston_calibration_observations: int = Field(default=250, gt=0)
+    max_heston_calibration_starts: int = Field(default=10, gt=0)
+    max_heston_calibration_iterations: int = Field(default=500, gt=0)
+    max_heston_calibration_surface_points: int = Field(default=500, gt=0)
+    max_heston_calibration_diagnostic_points: int = Field(default=500, gt=0)
+    max_model_comparison_models: int = Field(default=7, gt=0)
+    max_model_comparison_observations: int = Field(default=500, gt=0)
+    max_model_comparison_surface_points: int = Field(default=1_000, gt=0)
+    max_model_comparison_experiment_points: int = Field(default=20, gt=0)
+    max_model_comparison_runtime_repetitions: int = Field(default=10, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -78,6 +88,16 @@ class Settings(BaseModel):
             "max_heston_convergence_points",
             "max_heston_smile_points",
             "max_heston_sensitivity_points",
+            "max_heston_calibration_observations",
+            "max_heston_calibration_starts",
+            "max_heston_calibration_iterations",
+            "max_heston_calibration_surface_points",
+            "max_heston_calibration_diagnostic_points",
+            "max_model_comparison_models",
+            "max_model_comparison_observations",
+            "max_model_comparison_surface_points",
+            "max_model_comparison_experiment_points",
+            "max_model_comparison_runtime_repetitions",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value

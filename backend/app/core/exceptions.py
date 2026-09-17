@@ -29,6 +29,10 @@ class HestonPricingError(QuantitativeError):
     """Raised for invalid or numerically unsafe Heston operations."""
 
 
+class HestonCalibrationError(HestonPricingError):
+    """Raised for invalid datasets or unsuccessful Heston calibration operations."""
+
+
 class StatisticalError(QuantitativeError):
     """Raised when an estimator cannot be formed from the supplied observations."""
 
