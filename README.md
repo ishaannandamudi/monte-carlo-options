@@ -34,6 +34,9 @@ Phase 18 adds risk-neutral Merton jump diffusion with lognormal compound-Poisson
 aggregate-jump terminal and path simulation, a conditional-lognormal Poisson-mixture pricer,
 implied-volatility smiles, jump diagnostics and sensitivities, plus comparison, portfolio, and
 explicit risk-factor integration.
+Phase 19 adds finite Markov-chain diagnostics and Gaussian hidden Markov models for real-world
+latent-regime research, including log-space filtering/smoothing, Viterbi decoding, deterministic
+multi-start Baum-Welch estimation, probability forecasts, and regime-conditioned VaR/ES.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -159,11 +162,55 @@ currency-safe decimal amounts.
 - BSM/Heston descriptive comparisons and Phase 15 market-fit support by expiry and moneyness
 - European vanilla portfolio pricing, diffusion-volatility Greeks, explicit jump-parameter shocks,
   deterministic realized-jump stresses, and opt-in Phase 17 jump-factor histories
+- Validated finite-state Markov chains, stationary distributions, persistence, expected duration,
+  entropy, and multi-horizon probability forecasts
+- Univariate and multivariate Gaussian HMMs with diagonal or full covariance emissions
+- Log-space forward/backward inference, filtered versus smoothed probabilities, and Viterbi paths
+- Baum-Welch EM with covariance/transition floors, low-occupancy handling, and monotonic histories
+- Quantile or seeded random initialization, deterministic multi-start fitting, and canonical labels
+- State occupancy, moments, volatility, transition, duration, AIC/BIC, and model-order diagnostics
+- Explicit standardization transforms, one-step online filtering, and bounded walk-forward research
+- State-conditional normal risk and sampled Gaussian-mixture VaR/ES without averaging state VaRs
+- Phase 15 residual grouping, unchanged Phase 16 stress context, and Phase 17 loss conventions
+- Separate real-world Markov-switching GBM research simulation with no pricing-drift substitution
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
 non-Merton jump laws, stochastic-volatility-with-jumps, portfolio optimization, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
+
+## Latent regimes and Gaussian HMMs
+
+Phase 19 treats historical-return HMMs as real-world (**P**-measure) descriptive models. It never
+uses fitted historical state means as risk-neutral option-pricing drifts. The default Gaussian HMM
+uses diagonal covariance and orders fitted states by first-feature mean; full covariance and
+volatility ordering are explicit alternatives. Filtered probabilities use data through the current
+time, while smoothed probabilities use the full sample and may change with future observations.
+
+Baum-Welch fitting runs in log space, derives deterministic PCG64 child streams for independent
+starts, floors variances and transitions, and retains state parameters when posterior occupancy is
+too small. The implementation accumulates transition sufficient statistics without a full
+`T x K x K` allocation. AIC/BIC, state summaries, stationary probabilities, duration, model-order
+comparison, one-step filtering, forecasts, and bounded walk-forward analysis support research and
+diagnostics without semantic labels or trading recommendations.
+
+The regime-risk endpoint samples the state and conditional Gaussian factor vector jointly, then
+uses the Phase 17 `Loss = -PnL` convention. Mixture VaR/ES is calculated from mixture losses; it is
+never a probability-weighted average of state VaRs.
+
+Main endpoints:
+
+- `POST /api/regime/hmm/fit`
+- `POST /api/regime/hmm/decode`
+- `POST /api/regime/hmm/forecast`
+- `POST /api/regime/hmm/model-order`
+- `POST /api/regime/hmm/filter`
+- `POST /api/regime/risk`
+- `POST /api/regime/markov/diagnostics`
+
+See [docs/phase19-regime-hmm.md](docs/phase19-regime-hmm.md) for algorithms, edge policies,
+look-ahead rules, and integration boundaries. Performance methodology is in
+[benchmarks/phase19-regime-hmm.md](benchmarks/phase19-regime-hmm.md).
 
 ## Merton jump diffusion
 
@@ -1755,6 +1802,12 @@ reduction; a frozen analytical benchmark; parity; large-intensity truncation; ju
 Monte Carlo error scaled by SE; deterministic child streams; smiles, sweeps, Greeks, objective
 residuals, registry, market-fit, portfolio, scenario, Phase 17 mapping, APIs, and resource limits.
 The opt-in benchmark prices one million terminal paths and a 100-strike smile.
+Phase 19 tests compare forward/backward probabilities and Viterbi paths with brute-force state
+enumeration; verify Markov validation, stationary distributions, duration, and forecasts; exercise
+EM monotonicity, covariance floors, deterministic multi-start recovery, canonical labels, AIC/BIC,
+multivariate covariance, look-ahead-safe filtering, walk-forward scoring, Phase 15/16/17
+integrations, every API route, response bounds, and real-world switching-GBM reproducibility. Opt-in
+cases cover 1,000 and 10,000 observations with two and four states.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1854,7 +1907,11 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Merton calibration is limited to a finite price-residual objective helper; no automatic fit is run
 - Generic volatility shifts change Merton diffusion volatility and never alter jump parameters
 - Explicit Merton factor histories and stresses are user inputs, not inferred realized jumps
-- Bates, Kou, infinite-activity Lévy models, and regime switching are outside Phase 18
+- Bates, Kou, infinite-activity Lévy models, and switching Heston/Merton remain outside the current
+  scope
+- Historical Gaussian HMMs describe the real-world measure; their fitted means are never silently
+  used as risk-neutral derivative-pricing drifts
+- HMM observations must be complete and finite; Student-t emissions and live streaming are deferred
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1877,6 +1934,6 @@ infinity.
 
 ## Roadmap
 
-Phase 19 may add regime-switching or hidden-Markov research under its own specification. Bates,
-other jump laws, QMC, live HFT/broker integration, portfolio optimization, and a frontend remain
-unimplemented.
+Phase 20 may address Sobol or other quasi-Monte Carlo research under its own specification. Bates,
+other jump laws, switching Heston/Merton, live HFT/broker integration, portfolio optimization, and
+a frontend remain unimplemented.

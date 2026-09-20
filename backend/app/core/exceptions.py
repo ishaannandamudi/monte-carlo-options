@@ -33,6 +33,10 @@ class MertonPricingError(QuantitativeError):
     """Raised for invalid or numerically unsafe Merton jump-diffusion operations."""
 
 
+class RegimeModelError(QuantitativeError):
+    """Raised for invalid or numerically unsafe Markov/HMM operations."""
+
+
 class HestonCalibrationError(HestonPricingError):
     """Raised for invalid datasets or unsuccessful Heston calibration operations."""
 

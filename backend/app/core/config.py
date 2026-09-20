@@ -71,6 +71,14 @@ class Settings(BaseModel):
     max_risk_contribution_positions: int = Field(default=250, gt=0)
     max_risk_backtest_observations: int = Field(default=10_000, gt=0)
     max_risk_tail_output: int = Field(default=100, gt=0)
+    max_hmm_observations: int = Field(default=100_000, gt=0)
+    max_hmm_features: int = Field(default=20, gt=0)
+    max_hmm_states: int = Field(default=10, gt=1)
+    max_hmm_iterations: int = Field(default=1_000, gt=0)
+    max_hmm_starts: int = Field(default=20, gt=0)
+    max_hmm_model_order_candidates: int = Field(default=10, gt=0)
+    max_hmm_probability_output_points: int = Field(default=10_000, gt=0)
+    max_regime_risk_simulations: int = Field(default=1_000_000, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -134,6 +142,14 @@ class Settings(BaseModel):
             "max_risk_contribution_positions",
             "max_risk_backtest_observations",
             "max_risk_tail_output",
+            "max_hmm_observations",
+            "max_hmm_features",
+            "max_hmm_states",
+            "max_hmm_iterations",
+            "max_hmm_starts",
+            "max_hmm_model_order_candidates",
+            "max_hmm_probability_output_points",
+            "max_regime_risk_simulations",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value
