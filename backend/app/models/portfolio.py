@@ -389,6 +389,8 @@ class MarketScenario(PortfolioModel):
     time_shift_years: float | None = Field(default=None, ge=0.0)
     per_underlying_spot_relative_shifts: dict[str, float] = Field(default_factory=dict)
     per_underlying_spot_absolute_shifts: dict[str, float] = Field(default_factory=dict)
+    per_underlying_volatility_absolute_shifts: dict[str, float] = Field(default_factory=dict)
+    per_underlying_dividend_yield_shifts: dict[str, float] = Field(default_factory=dict)
     heston: HestonScenario | None = None
     heston_parameters_by_position: dict[str, HestonParameters] = Field(default_factory=dict)
     correlation_matrix_by_position: dict[str, tuple[tuple[float, ...], ...]] = Field(

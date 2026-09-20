@@ -58,6 +58,13 @@ class Settings(BaseModel):
     max_portfolio_grid_points: int = Field(default=2_500, gt=0)
     max_portfolio_stress_scenarios: int = Field(default=100, gt=0)
     max_portfolio_model_risk_models: int = Field(default=7, gt=0)
+    max_risk_historical_scenarios: int = Field(default=10_000, gt=0)
+    max_risk_monte_carlo_simulations: int = Field(default=1_000_000, gt=0)
+    max_risk_positions: int = Field(default=1_000, gt=0)
+    max_risk_scenario_position_evaluations: int = Field(default=250_000, gt=0)
+    max_risk_contribution_positions: int = Field(default=250, gt=0)
+    max_risk_backtest_observations: int = Field(default=10_000, gt=0)
+    max_risk_tail_output: int = Field(default=100, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -108,6 +115,13 @@ class Settings(BaseModel):
             "max_portfolio_grid_points",
             "max_portfolio_stress_scenarios",
             "max_portfolio_model_risk_models",
+            "max_risk_historical_scenarios",
+            "max_risk_monte_carlo_simulations",
+            "max_risk_positions",
+            "max_risk_scenario_position_evaluations",
+            "max_risk_contribution_positions",
+            "max_risk_backtest_observations",
+            "max_risk_tail_output",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value

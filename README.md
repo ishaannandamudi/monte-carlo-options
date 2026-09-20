@@ -27,6 +27,9 @@ calibration uncertainty, theoretical consistency checks, and explicit model-risk
 Phase 16 adds typed mixed-instrument portfolios, signed quantities, mark-to-model valuation,
 canonical and scaled Greek aggregation, exposure groupings, deterministic scenario/stress grids,
 full repricing, local Greek approximations, P&L explain, and portfolio model-spread analysis.
+Phase 17 adds portfolio historical, parametric-normal, and correlated-factor Monte Carlo Value at
+Risk and Expected Shortfall; Euler and empirical-tail risk contributions; deterministic backtests;
+and a combined report that keeps named stresses separate from probabilistic loss samples.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -135,11 +138,74 @@ currency-safe decimal amounts.
 - Ordered one- and multi-dimensional scenario grids, named stresses, and contribution identities
 - Position and portfolio P&L explain plus descriptive Phase 15 model-spread integration
 - Explicit Phase 6 sticky-strike BSM surface valuation and Phase 14 calibrated-Heston references
+- Dated same-period historical factor replay with ERROR, ZERO_SHOCK, and DROP_SCENARIO policies
+- Explicit `Loss = -PnL`, configurable VaR quantiles, and fractional-mass empirical ES
+- Delta-normal VaR/normal ES with sample or supplied PSD covariance and explicit IID horizon scaling
+- Batched multivariate-normal and covariance-standardized Student-t factor Monte Carlo
+- Full revaluation, Delta, and diagonal Delta-Gamma risk modes with explicit cross-term limits
+- Marginal factor VaR, Euler component VaR, leave-one-out incremental VaR, and tail ES contributions
+- Risk contribution groupings by underlying, instrument class, and selected pricing model
+- Skew, excess-kurtosis, Jarque-Bera, quantile, worst-scenario, and concentration diagnostics
+- Strict VaR exceptions plus stable Kupiec POF, Christoffersen independence, and coverage diagnostics
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
-jumps, VaR, Expected Shortfall, portfolio optimization, parallelism, a GPU backend,
+jumps, portfolio optimization, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
+
+## Portfolio VaR and Expected Shortfall
+
+Phase 17 uses one sign convention throughout:
+
+```text
+PnL  = V_horizon - V_today
+Loss = -PnL
+VaR_alpha = alpha-quantile(Loss)
+```
+
+Historical and Monte Carlo ES use the worst exact empirical mass `N * (1-alpha)`. Whole tail
+observations receive weight one and, when needed, the next observation receives the fractional
+remaining weight. If the tail mass is below one observation, the worst observation defines ES.
+VaR uses `numpy.quantile` with the explicitly configured method, defaulting to `linear`.
+
+Historical risk replays simultaneous dated shocks so observed cross-factor dependence is retained.
+Full revaluation delegates each scenario to Phase 16. Delta mode uses mapped local exposures;
+diagonal Delta-Gamma adds `0.5 * Gamma_i * x_i^2` and explicitly omits cross-Gamma. Missing factors
+error by default and can instead zero that named shock or drop the entire dated scenario. Historical
+shocks are never silently square-root scaled. Optional time passage is separate and off by default.
+
+Parametric risk treats daily factor changes as multivariate normal. With P&L exposure `w`, daily
+mean `m`, and covariance `Sigma`, horizon scaling under the configured IID assumption uses
+`m_h = h*m` and `Sigma_h = h*Sigma`. Normal loss VaR and ES are:
+
+```text
+mu_L = -(w' m_h + Theta passage)
+sigma_L = sqrt(w' Sigma_h w)
+VaR = mu_L + z_alpha sigma_L
+ES  = mu_L + sigma_L phi(z_alpha)/(1-alpha)
+```
+
+Factor marginal VaR differentiates this expression. Position component VaR is the Euler derivative
+with respect to each position scale and sums to total VaR, including mapped mean and optional Theta
+passage. Incremental VaR removes one position and recomputes risk. For empirical methods, ES
+contributions average position losses with exactly the same fractional tail weights as portfolio ES.
+
+Monte Carlo builds correlated factor draws from the supplied or historical sample covariance using
+isolated PCG64 state. Normal and covariance-standardized Student-t draws are supported. Batches
+avoid retaining a simulation-by-position matrix in Greek modes; the portfolio loss vector remains
+in memory for exact quantiles, and selected tail shocks are deterministically regenerated when
+contributions are requested. Antithetic factors are optional and carry no promised tail benefit.
+
+VaR backtesting counts an exception only when `Loss > predicted VaR`; equality is not an exception.
+Kupiec proportion-of-failures, Christoffersen first-order independence, and their conditional-
+coverage sum use stable likelihood calculations at zero and all exceptions. The traffic-light field
+is a descriptive two-standard-deviation comparison with the expected exception count, not a
+regulatory capital conclusion. Named Phase 16 stress losses remain separate fields and never enter
+the VaR/ES distribution.
+
+See [docs/phase17-var-es-risk.md](docs/phase17-var-es-risk.md) for exact mapping, estimator,
+contribution, batching, failure, and resource conventions. Local measurements are in
+[benchmarks/phase17-var-es-risk.md](benchmarks/phase17-var-es-risk.md).
 
 ## Mathematical model
 
@@ -815,6 +881,8 @@ backend/app/
 ├── models/        # vanilla/exotic contracts, schedules, configs, enums, and typed results
 ├── payoffs/       # vectorized vanilla, path-dependent, digital, barrier, and basket payoffs
 ├── pricing/       # analytical, Monte Carlo, tree, LSM, exotic, basket, and Heston engines
+├── portfolio/     # mixed-position valuation, Greeks, scenarios, stress, and P&L explain
+├── risk/          # VaR/ES estimators, factor simulation, contributions, and backtesting
 ├── simulation/    # GBM/Heston processes, correlation factors, CRN, and RNG ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
@@ -1071,6 +1139,22 @@ POST /api/portfolio/stress
 POST /api/portfolio/pnl-explain
 POST /api/portfolio/model-risk
 ```
+
+Phase 17 market-risk routes are:
+
+```text
+POST /api/risk/historical
+POST /api/risk/parametric
+POST /api/risk/monte-carlo
+POST /api/risk/portfolio
+POST /api/risk/contributions
+POST /api/risk/backtest
+POST /api/risk/report
+```
+
+The three method endpoints use method-specific typed bodies; `/portfolio` dispatches a unified
+request. `/contributions` requires contribution output. `/report` adds named Phase 16 stresses to a
+separate response field. No endpoint returns raw loss samples or a full simulation-position matrix.
 
 Each position carries a typed instrument, explicit market snapshot, signed quantity, optional
 pricing model, and model-specific numerical configuration. Omitted models follow the documented
@@ -1472,6 +1556,13 @@ MAX_MODEL_COMPARISON_OBSERVATIONS=500
 MAX_MODEL_COMPARISON_SURFACE_POINTS=1000
 MAX_MODEL_COMPARISON_EXPERIMENT_POINTS=20
 MAX_MODEL_COMPARISON_RUNTIME_REPETITIONS=10
+MAX_RISK_HISTORICAL_SCENARIOS=10000
+MAX_RISK_MONTE_CARLO_SIMULATIONS=1000000
+MAX_RISK_POSITIONS=1000
+MAX_RISK_SCENARIO_POSITION_EVALUATIONS=250000
+MAX_RISK_CONTRIBUTION_POSITIONS=250
+MAX_RISK_BACKTEST_OBSERVATIONS=10000
+MAX_RISK_TAIL_OUTPUT=100
 MAX_OPTION_CHAIN_CONTRACTS=5000
 MAX_QUOTE_AGE_SECONDS=900
 MARKET_DATA_PROVIDER=MASSIVE
@@ -1533,6 +1624,12 @@ and alternate models. Existing path, monitoring, tree, LSM, Heston, and multi-as
 also checked for each nested position before valuation. Scenario products are checked before cells
 are allocated.
 
+Risk limits independently cap dated histories, generated factor scenarios, positions,
+scenario-position full-revaluation work, contribution widths, backtest histories, and returned tail
+scenarios. The API checks these products before factor generation, repricing, or matrix allocation,
+then applies every existing nested pricing-engine limit. Library calls remain available for
+deliberate larger research workloads.
+
 ## Tests and quality checks
 
 ```bash
@@ -1588,6 +1685,16 @@ curvature diagnostics; structured holdouts; compute frontiers; input and calibra
 local covariance propagation; consistency flags; partial failures; every API route; deterministic
 signatures; serialization; and all new resource limits. Opt-in cases cover a repeated five-model
 contract comparison and a maturity-batched Heston surface workload.
+Phase 16 tests cover mixed typed portfolios, signed values, aggregate/scaled Greeks, deterministic
+and stochastic dispatch, all scenario dimensions, full-reprice identities, local approximations,
+grids, named stresses, P&L explain, model spreads, caching, APIs, and nested work limits.
+Phase 17 tests cover the loss sign; explicit empirical quantiles; fractional-tail ES; zero-risk,
+single-factor, covariance, correlation, and horizon identities; historical full and Greek replay;
+missing factors; Heston and basket-correlation shocks; normal and Student-t Monte Carlo; exact odd
+antithetic counts; component/incremental VaR and ES contribution identities; tail diagnostics;
+strict exception equality; Kupiec and Christoffersen boundaries; stress separation; every route;
+serialization; reproducibility; and pre-allocation rejection. Opt-in cases cover parametric models
+through 500 factors and 100k/500k Monte Carlo factor draws.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1667,6 +1774,18 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Portfolio market inputs are explicit snapshots; `market_data_reference` is provenance only and
   no live market-data fetch occurs during portfolio valuation
 - Model-price spread is descriptive rather than probabilistic risk
+- VaR and ES are loss-distribution estimates under the selected factor history/model and pricing
+  mode; they are not maximum possible losses or predictions of a particular future outcome
+- Historical observations are replayed jointly by timestamp; no independent factor resampling,
+  filtered historical simulation, volatility scaling, or EVT tail fit is performed
+- Historical VaR/ES sampling uncertainty is not assigned a confidence interval in Phase 17
+- Delta-normal risk assumes a normal linear factor model; IID multi-day scaling is explicit
+- Delta-Gamma risk contains diagonal Gamma only and omits cross-Gamma and other cross sensitivities
+- Generic factor Monte Carlo is normal or Student-t and does not infer a Heston process, calibrated
+  Heston changes, volatility-surface PCA, or changing correlations without explicit factors
+- Empirical VaR and ES retain the portfolio loss vector for exact selection; full-revaluation
+  contribution requests are subject to stricter API limits
+- Backtest traffic-light output is descriptive and is not a Basel regulatory classification
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1689,7 +1808,6 @@ infinity.
 
 ## Roadmap
 
-Phase 17 can add historical, parametric, and Monte Carlo VaR, Expected Shortfall, and validation on
-top of Phase 16's explicit portfolio/scenario boundary. HFT or live risk integration begins only
-after this milestone. Later phases can add parametric surface fitting, quote repair, jump diffusion,
-regime switching, quasi-Monte Carlo, and an interactive dashboard. None are implemented in Phase 16.
+Phase 18 may build on the explicit Phase 17 factor histories and loss distributions with the next
+approved research scope. Regime switching, jump diffusion, QMC, live HFT/broker integration,
+portfolio optimization, and a frontend remain unimplemented.

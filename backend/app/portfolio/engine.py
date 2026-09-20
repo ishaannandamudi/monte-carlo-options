@@ -1035,7 +1035,9 @@ def _scenario_single(position: PositionT, scenario: MarketScenario) -> PositionT
     )
     if not is_heston:
         volatility = volatility * (1.0 + (scenario.volatility_relative_shift or 0.0)) + (
-            scenario.volatility_absolute_shift or 0.0
+            scenario.per_underlying_volatility_absolute_shifts.get(
+                position.underlying_id, scenario.volatility_absolute_shift or 0.0
+            )
         )
         if volatility < 0.0:
             raise PortfolioRiskError(
@@ -1046,7 +1048,10 @@ def _scenario_single(position: PositionT, scenario: MarketScenario) -> PositionT
         spot=spot,
         volatility=volatility,
         rate=position.market.risk_free_rate + (scenario.rate_absolute_shift or 0.0),
-        dividend=position.market.dividend_yield + (scenario.dividend_yield_shift or 0.0),
+        dividend=position.market.dividend_yield
+        + scenario.per_underlying_dividend_yield_shifts.get(
+            position.underlying_id, scenario.dividend_yield_shift or 0.0
+        ),
         maturity=maturity,
     )
     if isinstance(updated_position, VanillaPosition) and updated_position.use_surface_volatility:
@@ -1080,8 +1085,12 @@ def _scenario_basket(position: BasketPosition, scenario: MarketScenario) -> Bask
         spots.append(shocked)
     volatilities = tuple(
         volatility * (1.0 + (scenario.volatility_relative_shift or 0.0))
-        + (scenario.volatility_absolute_shift or 0.0)
-        for volatility in position.market.volatilities
+        + scenario.per_underlying_volatility_absolute_shifts.get(
+            identifier, scenario.volatility_absolute_shift or 0.0
+        )
+        for identifier, volatility in zip(
+            position.market.asset_ids, position.market.volatilities, strict=True
+        )
     )
     if any(volatility < 0.0 for volatility in volatilities):
         raise PortfolioRiskError("scenario makes a basket volatility negative")
@@ -1102,8 +1111,13 @@ def _scenario_basket(position: BasketPosition, scenario: MarketScenario) -> Bask
         spots=tuple(spots),
         risk_free_rate=position.market.risk_free_rate + (scenario.rate_absolute_shift or 0.0),
         dividend_yields=tuple(
-            value + (scenario.dividend_yield_shift or 0.0)
-            for value in position.market.dividend_yields
+            value
+            + scenario.per_underlying_dividend_yield_shifts.get(
+                identifier, scenario.dividend_yield_shift or 0.0
+            )
+            for identifier, value in zip(
+                position.market.asset_ids, position.market.dividend_yields, strict=True
+            )
         ),
         volatilities=volatilities,
         correlation_matrix=effective_matrix,
@@ -1209,13 +1223,17 @@ def _position_approximation(
     d_vol = 0.0
     if not is_heston:
         if isinstance(position, BasketPosition):
-            if scenario.volatility_absolute_shift or scenario.volatility_relative_shift:
+            if (
+                scenario.volatility_absolute_shift
+                or scenario.volatility_relative_shift
+                or scenario.per_underlying_volatility_absolute_shifts
+            ):
                 flags.append(ScenarioFlag.MISSING_GREEKS)
                 return None, flags
         else:
-            d_vol = (scenario.volatility_absolute_shift or 0.0) + (
-                position.market.volatility * (scenario.volatility_relative_shift or 0.0)
-            )
+            d_vol = scenario.per_underlying_volatility_absolute_shifts.get(
+                position.underlying_id, scenario.volatility_absolute_shift or 0.0
+            ) + (position.market.volatility * (scenario.volatility_relative_shift or 0.0))
     if d_vol != 0.0:
         if greeks.vega is None:
             flags.append(ScenarioFlag.MISSING_GREEKS)
@@ -1231,7 +1249,7 @@ def _position_approximation(
             flags.append(ScenarioFlag.MISSING_GREEKS)
             return None, flags
         terms.append(greeks.theta * scenario.time_shift_years)
-    if scenario.dividend_yield_shift:
+    if scenario.dividend_yield_shift or scenario.per_underlying_dividend_yield_shifts:
         flags.append(ScenarioFlag.MISSING_GREEKS)
         return None, flags
     if scenario.heston is not None or scenario.heston_parameters_by_position:
