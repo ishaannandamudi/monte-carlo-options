@@ -29,6 +29,10 @@ class HestonPricingError(QuantitativeError):
     """Raised for invalid or numerically unsafe Heston operations."""
 
 
+class MertonPricingError(QuantitativeError):
+    """Raised for invalid or numerically unsafe Merton jump-diffusion operations."""
+
+
 class HestonCalibrationError(HestonPricingError):
     """Raised for invalid datasets or unsuccessful Heston calibration operations."""
 

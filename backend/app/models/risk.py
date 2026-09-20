@@ -59,6 +59,9 @@ class RiskFactorType(StrEnum):
     HESTON_KAPPA_CHANGE = "HESTON_KAPPA_CHANGE"
     HESTON_SIGMA_V_CHANGE = "HESTON_SIGMA_V_CHANGE"
     HESTON_RHO_CHANGE = "HESTON_RHO_CHANGE"
+    MERTON_JUMP_INTENSITY_CHANGE = "MERTON_JUMP_INTENSITY_CHANGE"
+    MERTON_JUMP_MEAN_CHANGE = "MERTON_JUMP_MEAN_CHANGE"
+    MERTON_JUMP_VOLATILITY_CHANGE = "MERTON_JUMP_VOLATILITY_CHANGE"
     CORRELATION_CHANGE = "CORRELATION_CHANGE"
     CUSTOM_GAUSSIAN = "CUSTOM_GAUSSIAN"
 
@@ -146,6 +149,9 @@ class RiskFactorMapping(RiskModel):
             RiskFactorType.HESTON_KAPPA_CHANGE,
             RiskFactorType.HESTON_SIGMA_V_CHANGE,
             RiskFactorType.HESTON_RHO_CHANGE,
+            RiskFactorType.MERTON_JUMP_INTENSITY_CHANGE,
+            RiskFactorType.MERTON_JUMP_MEAN_CHANGE,
+            RiskFactorType.MERTON_JUMP_VOLATILITY_CHANGE,
             RiskFactorType.CORRELATION_CHANGE,
         }
         if self.factor_type in underlying_types and self.underlying_id is None:

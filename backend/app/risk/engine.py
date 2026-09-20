@@ -16,6 +16,7 @@ from scipy.stats import norm
 
 from backend.app.core.exceptions import PortfolioRiskError
 from backend.app.models.heston import HestonParameters
+from backend.app.models.merton import MertonJumpParameters
 from backend.app.models.portfolio import (
     BasketPosition,
     MarketScenario,
@@ -169,6 +170,9 @@ def _mapping_exposure(
         RiskFactorType.HESTON_KAPPA_CHANGE,
         RiskFactorType.HESTON_SIGMA_V_CHANGE,
         RiskFactorType.HESTON_RHO_CHANGE,
+        RiskFactorType.MERTON_JUMP_INTENSITY_CHANGE,
+        RiskFactorType.MERTON_JUMP_MEAN_CHANGE,
+        RiskFactorType.MERTON_JUMP_VOLATILITY_CHANGE,
         RiskFactorType.CORRELATION_CHANGE,
     }:
         if mapping.position_id == position.position_id and require_available:
@@ -266,6 +270,12 @@ def _base_heston_parameters(position: VanillaPosition) -> HestonParameters:
     raise PortfolioRiskError(f"position {position.position_id} has no Heston parameters")
 
 
+def _base_merton_parameters(position: VanillaPosition) -> MertonJumpParameters:
+    if position.merton_parameters is not None:
+        return position.merton_parameters
+    raise PortfolioRiskError(f"position {position.position_id} has no Merton parameters")
+
+
 def _scenario_from_shocks(
     portfolio: Portfolio,
     mappings: list[RiskFactorMapping],
@@ -278,6 +288,7 @@ def _scenario_from_shocks(
     dividends: dict[str, float] = {}
     correlation: dict[str, float] = {}
     heston_changes: dict[str, dict[str, float]] = {}
+    merton_changes: dict[str, dict[str, float]] = {}
     rate = 0.0
     positions = {item.position_id: item for item in portfolio.positions}
     heston_field = {
@@ -286,6 +297,11 @@ def _scenario_from_shocks(
         RiskFactorType.HESTON_KAPPA_CHANGE: "kappa",
         RiskFactorType.HESTON_SIGMA_V_CHANGE: "sigma_v",
         RiskFactorType.HESTON_RHO_CHANGE: "rho",
+    }
+    merton_field = {
+        RiskFactorType.MERTON_JUMP_INTENSITY_CHANGE: "jump_intensity",
+        RiskFactorType.MERTON_JUMP_MEAN_CHANGE: "jump_mean",
+        RiskFactorType.MERTON_JUMP_VOLATILITY_CHANGE: "jump_volatility",
     }
     for mapping, value in zip(mappings, shocks, strict=True):
         change = float(value)
@@ -310,6 +326,11 @@ def _scenario_from_shocks(
                 )
                 + change
             )
+        elif mapping.factor_type in merton_field:
+            assert mapping.position_id is not None
+            field = merton_field[mapping.factor_type]
+            updates = merton_changes.setdefault(mapping.position_id, {})
+            updates[field] = updates.get(field, 0.0) + change
         elif mapping.factor_type is RiskFactorType.CORRELATION_CHANGE:
             assert mapping.position_id is not None
             correlation[mapping.position_id] = correlation.get(mapping.position_id, 0.0) + change
@@ -325,6 +346,16 @@ def _scenario_from_shocks(
         for field, change in updates.items():
             values[field] = cast(float, values[field]) + change
         heston_parameters[position_id] = HestonParameters.model_validate(values)
+    merton_parameters: dict[str, MertonJumpParameters] = {}
+    for position_id, updates in merton_changes.items():
+        position = positions[position_id]
+        if not isinstance(position, VanillaPosition):
+            raise PortfolioRiskError("Merton factor mapping requires a vanilla position")
+        merton = _base_merton_parameters(position)
+        values = merton.model_dump()
+        for field, change in updates.items():
+            values[field] = cast(float, values[field]) + change
+        merton_parameters[position_id] = MertonJumpParameters.model_validate(values)
     return MarketScenario(
         per_underlying_spot_relative_shifts=spots,
         per_underlying_volatility_absolute_shifts=vols,
@@ -332,6 +363,7 @@ def _scenario_from_shocks(
         per_underlying_dividend_yield_shifts=dividends,
         time_shift_years=time_shift_years,
         heston_parameters_by_position=heston_parameters,
+        merton_parameters_by_position=merton_parameters,
         equicorrelation_shift_by_position=correlation,
     )
 

@@ -33,6 +33,7 @@ from backend.app.models.heston_calibration import (
     HestonCalibrationTarget,
 )
 from backend.app.models.market import MarketEnvironment
+from backend.app.models.merton import MertonJumpParameters
 from backend.app.models.model_comparison import (
     CalibrationEnsembleMember,
     CalibrationEnsembleResult,
@@ -92,6 +93,11 @@ from backend.app.pricing.heston_analytical import (
 )
 from backend.app.pricing.implied_volatility import solve_implied_volatility
 from backend.app.pricing.longstaff_schwartz import longstaff_schwartz_price
+from backend.app.pricing.merton import (
+    merton_analytical_greeks,
+    merton_analytical_price,
+    merton_monte_carlo_price,
+)
 from backend.app.pricing.monte_carlo import MonteCarloPricer
 from backend.app.pricing.monte_carlo_greeks import monte_carlo_greeks
 from backend.app.simulation.random import spawn_child_seeds
@@ -434,6 +440,59 @@ def _run_model_once(
             if request.config.include_greeks
             else [],
         )
+    if model is PricingModel.MERTON_ANALYTICAL:
+        assert request.merton_parameters is not None
+        merton_result = merton_analytical_price(
+            contract, market, request.merton_parameters, request.merton_series
+        )
+        values = ModelGreekValues()
+        if request.config.include_greeks:
+            merton_greeks = merton_analytical_greeks(
+                contract, market, request.merton_parameters, request.merton_series
+            )
+            values = ModelGreekValues(
+                delta=merton_greeks.delta,
+                gamma=merton_greeks.gamma,
+                vega=merton_greeks.diffusion_vega,
+                theta=merton_greeks.theta,
+                rho=merton_greeks.rho,
+            )
+            warnings.append("Merton Vega is sensitivity to diffusion volatility only.")
+        return ModelOutput(
+            model=model,
+            status=ModelRunStatus.SUCCESS,
+            price=merton_result.price,
+            runtime_ms=merton_result.runtime_ms,
+            deterministic=True,
+            greeks=values,
+            warnings=warnings,
+            calibration=ModelCalibrationMetadata(
+                calibration_required=False, source="explicit_merton_parameters"
+            ),
+        )
+    if model is PricingModel.MERTON_MONTE_CARLO:
+        assert request.merton_parameters is not None
+        merton_config = request.merton_monte_carlo.model_copy(update={"seed": seed})
+        merton_mc_result = merton_monte_carlo_price(
+            contract, market, request.merton_parameters, merton_config
+        )
+        return ModelOutput(
+            model=model,
+            status=ModelRunStatus.SUCCESS,
+            price=merton_mc_result.price,
+            runtime_ms=merton_mc_result.runtime_ms,
+            deterministic=False,
+            standard_error=merton_mc_result.standard_error,
+            confidence_interval_low=merton_mc_result.confidence_interval_low,
+            confidence_interval_high=merton_mc_result.confidence_interval_high,
+            paths=merton_mc_result.num_simulations,
+            warnings=["Merton Monte Carlo Greeks are unavailable; use the analytical engine."]
+            if request.config.include_greeks
+            else [],
+            calibration=ModelCalibrationMetadata(
+                calibration_required=False, source="explicit_merton_parameters"
+            ),
+        )
     if model is PricingModel.LONGSTAFF_SCHWARTZ:
         lsm_config = request.longstaff_schwartz.model_copy(update={"seed": seed})
         lsm_result = longstaff_schwartz_price(contract, market, lsm_config)
@@ -501,7 +560,10 @@ def compare_models(request: ModelComparisonRequest) -> ModelComparisonResult:
     compatible: list[PricingModel] = []
     for model in request.config.selected_models:
         exclusion = compatibility_exclusion(
-            model, request.contract, heston_parameters_available=parameters is not None
+            model,
+            request.contract,
+            heston_parameters_available=parameters is not None,
+            merton_parameters_available=request.merton_parameters is not None,
         )
         if exclusion is None:
             compatible.append(model)
@@ -553,6 +615,12 @@ def compare_models(request: ModelComparisonRequest) -> ModelComparisonResult:
             PricingModel.HESTON_MONTE_CARLO,
             PricingModel.HESTON_ANALYTICAL,
         ),
+        (
+            "MERTON_ANALYTICAL_VS_MONTE_CARLO",
+            PricingModel.MERTON_MONTE_CARLO,
+            PricingModel.MERTON_ANALYTICAL,
+        ),
+        ("BSM_VS_MERTON", PricingModel.MERTON_ANALYTICAL, PricingModel.BLACK_SCHOLES),
         (
             "AMERICAN_CRR_VS_LONGSTAFF_SCHWARTZ",
             PricingModel.LONGSTAFF_SCHWARTZ,
@@ -835,6 +903,7 @@ def _market_model_price(
     parameters: HestonParameters | None,
     seed: int,
     heston_batches: dict[float, HestonAnalyticalBatchPricer],
+    merton_parameters: MertonJumpParameters | None,
 ) -> tuple[float, float]:
     market_volatility = (
         market_iv
@@ -873,6 +942,17 @@ def _market_model_price(
             raise ValueError("Heston parameters are required")
         heston_config = request.heston_monte_carlo.model_copy(update={"seed": seed})
         price = heston_monte_carlo_price(contract, market, parameters, heston_config).price
+    elif model is PricingModel.MERTON_ANALYTICAL:
+        if merton_parameters is None:
+            raise ValueError("Merton parameters are required")
+        price = merton_analytical_price(
+            contract, market, merton_parameters, request.merton_series
+        ).price
+    elif model is PricingModel.MERTON_MONTE_CARLO:
+        if merton_parameters is None:
+            raise ValueError("Merton parameters are required")
+        config = request.merton_monte_carlo.model_copy(update={"seed": seed})
+        price = merton_monte_carlo_price(contract, market, merton_parameters, config).price
     else:
         raise ValueError(
             "market-fit datasets contain European observations; American engines are incompatible"
@@ -893,13 +973,24 @@ def evaluate_market_fit(request: MarketFitRequest) -> MarketFitResult:
     seeds = iter(spawn_child_seeds(request.preprocessing.random_seed, seed_count))
     for model in request.selected_models:
         capability = model_capabilities(model)
-        if not capability.supports_european or (
-            capability.requires_calibration and parameters is None
-        ):
+        missing_heston = capability.requires_calibration and parameters is None
+        missing_merton = (
+            model
+            in {
+                PricingModel.MERTON_ANALYTICAL,
+                PricingModel.MERTON_MONTE_CARLO,
+            }
+            and request.merton_parameters is None
+        )
+        if not capability.supports_european or missing_heston or missing_merton:
             message = (
                 "model does not support European market-fit observations"
                 if not capability.supports_european
-                else "Heston parameters or a calibration result are required"
+                else (
+                    "Merton parameters are required"
+                    if missing_merton
+                    else "Heston parameters or a calibration result are required"
+                )
             )
             all_models.append(
                 ModelMarketFit(
@@ -935,6 +1026,7 @@ def evaluate_market_fit(request: MarketFitRequest) -> MarketFitResult:
                     parameters,
                     seed,
                     heston_batches,
+                    request.merton_parameters,
                 )
                 total_runtime += runtime
                 model_iv = _equivalent_iv(
@@ -1092,6 +1184,9 @@ def compare_surface(request: SurfaceComparisonRequest) -> MarketFitResult:
             integration=request.integration,
             gbm_monte_carlo=request.gbm_monte_carlo,
             heston_monte_carlo=request.heston_monte_carlo,
+            merton_parameters=request.merton_parameters,
+            merton_monte_carlo=request.merton_monte_carlo,
+            merton_series=request.merton_series,
             max_returned_residuals=request.max_returned_residuals,
         )
     )
@@ -1180,6 +1275,13 @@ def compute_frontier(request: ComputeFrontierRequest) -> ComputeFrontierResult:
             heston_config = base.heston_monte_carlo.model_copy(update=heston_updates)
             updates["heston_monte_carlo"] = heston_config
             approximate_memory = heston_config.num_simulations * 8 * 6
+        elif request.model is PricingModel.MERTON_MONTE_CARLO:
+            config = base.merton_monte_carlo.model_copy(
+                update={"num_simulations": budget, "seed": seed}
+            )
+            updates["merton_monte_carlo"] = config
+            budget_type = ComputeBudgetType.PATHS
+            approximate_memory = budget * 8 * 4
         elif request.model is PricingModel.LONGSTAFF_SCHWARTZ:
             lsm_updates = (
                 {"num_time_steps": budget, "seed": seed}

@@ -56,6 +56,7 @@ def _enforce_portfolio(
     barrier_nodes = 0
     basket_nodes = 0
     heston_nodes = 0
+    merton_paths = 0
     for position in positions:
         if isinstance(position, VanillaPosition):
             if position.simulation.num_simulations > settings.max_api_simulations:
@@ -99,6 +100,15 @@ def _enforce_portfolio(
                     position.heston_simulation.num_simulations
                     * position.heston_simulation.num_time_steps
                 )
+            elif model is PortfolioPricingModel.MERTON_MONTE_CARLO:
+                if position.merton_simulation.num_simulations > settings.max_merton_paths:
+                    _reject("portfolio Merton paths exceed API limit")
+                merton_paths += position.merton_simulation.num_simulations
+            elif (
+                model is PortfolioPricingModel.MERTON_ANALYTICAL
+                and position.merton_series.max_terms > settings.max_merton_series_terms
+            ):
+                _reject("portfolio Merton analytical series terms exceed API limit")
         elif isinstance(position, AsianPosition):
             if position.simulation.num_simulations > settings.max_api_simulations:
                 _reject("portfolio Asian simulation count exceeds API limit")
@@ -168,6 +178,8 @@ def _enforce_portfolio(
         _reject("aggregate portfolio basket path nodes exceed API limit")
     if heston_nodes * repetitions > settings.max_heston_total_path_nodes:
         _reject("aggregate portfolio Heston path-time nodes exceed API limit")
+    if merton_paths * repetitions > settings.max_merton_paths:
+        _reject("aggregate portfolio Merton paths exceed API limit")
 
 
 def _grid_size(request: ScenarioGridRequest) -> int:

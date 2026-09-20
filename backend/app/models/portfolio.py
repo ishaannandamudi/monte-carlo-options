@@ -18,6 +18,11 @@ from backend.app.models.heston import (
 from backend.app.models.heston_calibration import HestonCalibrationResult
 from backend.app.models.longstaff_schwartz import LongstaffSchwartzConfig
 from backend.app.models.market import MarketEnvironment
+from backend.app.models.merton import (
+    MertonJumpParameters,
+    MertonSeriesConfig,
+    MertonSimulationConfig,
+)
 from backend.app.models.multi_asset import MultiAssetMarketEnvironment
 from backend.app.models.option import ExerciseStyle, OptionContract, OptionType
 from backend.app.models.simulation import SimulationConfig
@@ -69,6 +74,8 @@ class PortfolioPricingModel(StrEnum):
     LONGSTAFF_SCHWARTZ = "LONGSTAFF_SCHWARTZ"
     HESTON_ANALYTICAL = "HESTON_ANALYTICAL"
     HESTON_MONTE_CARLO = "HESTON_MONTE_CARLO"
+    MERTON_ANALYTICAL = "MERTON_ANALYTICAL"
+    MERTON_MONTE_CARLO = "MERTON_MONTE_CARLO"
     ASIAN_MONTE_CARLO = "ASIAN_MONTE_CARLO"
     GEOMETRIC_ASIAN_ANALYTICAL = "GEOMETRIC_ASIAN_ANALYTICAL"
     DIGITAL_ANALYTICAL = "DIGITAL_ANALYTICAL"
@@ -143,6 +150,9 @@ class VanillaPosition(_PositionBase):
     heston_calibration_result: HestonCalibrationResult | None = None
     heston_simulation: HestonSimulationConfig = Field(default_factory=HestonSimulationConfig)
     heston_integration: HestonIntegrationConfig = Field(default_factory=HestonIntegrationConfig)
+    merton_parameters: MertonJumpParameters | None = None
+    merton_simulation: MertonSimulationConfig = Field(default_factory=MertonSimulationConfig)
+    merton_series: MertonSeriesConfig = Field(default_factory=MertonSeriesConfig)
     volatility_surface: VolatilitySurface | None = None
     use_surface_volatility: bool = False
 
@@ -312,6 +322,7 @@ class PositionMarketSnapshot(PortfolioModel):
     dividend_yields: dict[str, float]
     maturity_years: float = Field(ge=0.0)
     heston_parameters: HestonParameters | None = None
+    merton_parameters: MertonJumpParameters | None = None
     correlation_matrix: tuple[tuple[float, ...], ...] | None = None
 
 
@@ -378,6 +389,20 @@ class HestonScenario(PortfolioModel):
         return self
 
 
+class MertonScenario(PortfolioModel):
+    jump_intensity_shift: float | None = None
+    jump_mean_shift: float | None = None
+    jump_volatility_shift: float | None = None
+    overrides: MertonJumpParameters | None = None
+
+    @model_validator(mode="after")
+    def exclusive_override_or_shifts(self) -> Self:
+        shifts = (self.jump_intensity_shift, self.jump_mean_shift, self.jump_volatility_shift)
+        if self.overrides is not None and any(value is not None for value in shifts):
+            raise ValueError("choose Merton parameter overrides or additive shifts, not both")
+        return self
+
+
 class MarketScenario(PortfolioModel):
     name: str | None = None
     spot_relative_shift: float | None = None
@@ -393,6 +418,9 @@ class MarketScenario(PortfolioModel):
     per_underlying_dividend_yield_shifts: dict[str, float] = Field(default_factory=dict)
     heston: HestonScenario | None = None
     heston_parameters_by_position: dict[str, HestonParameters] = Field(default_factory=dict)
+    merton: MertonScenario | None = None
+    merton_parameters_by_position: dict[str, MertonJumpParameters] = Field(default_factory=dict)
+    realized_jump_log_size: float | None = None
     correlation_matrix_by_position: dict[str, tuple[tuple[float, ...], ...]] = Field(
         default_factory=dict
     )

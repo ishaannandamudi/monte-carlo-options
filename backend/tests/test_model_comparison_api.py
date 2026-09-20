@@ -79,7 +79,7 @@ def market_fit_payload() -> dict[str, object]:
 def test_registry_compare_and_partial_failure_endpoints(client: TestClient) -> None:
     registry = client.get("/api/analytics/models/registry")
     assert registry.status_code == 200
-    assert len(registry.json()) == 7
+    assert len(registry.json()) == 9
 
     first = client.post("/api/analytics/models/compare", json=comparison_payload())
     second = client.post("/api/analytics/models/compare", json=comparison_payload())

@@ -30,6 +30,10 @@ full repricing, local Greek approximations, P&L explain, and portfolio model-spr
 Phase 17 adds portfolio historical, parametric-normal, and correlated-factor Monte Carlo Value at
 Risk and Expected Shortfall; Euler and empirical-tail risk contributions; deterministic backtests;
 and a combined report that keeps named stresses separate from probabilistic loss samples.
+Phase 18 adds risk-neutral Merton jump diffusion with lognormal compound-Poisson jumps, exact
+aggregate-jump terminal and path simulation, a conditional-lognormal Poisson-mixture pricer,
+implied-volatility smiles, jump diagnostics and sensitivities, plus comparison, portfolio, and
+explicit risk-factor integration.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -147,11 +151,61 @@ currency-safe decimal amounts.
 - Risk contribution groupings by underlying, instrument class, and selected pricing model
 - Skew, excess-kurtosis, Jarque-Bera, quantile, worst-scenario, and concentration diagnostics
 - Strict VaR exceptions plus stable Kupiec POF, Christoffersen independence, and coverage diagnostics
+- Typed Merton log-jump parameters with the exact risk-neutral jump compensator
+- O(paths) exact terminal compound-Poisson simulation and optional exact interval path transitions
+- Stable conditional-lognormal Poisson-mixture call/put pricing with tail-mass diagnostics
+- Merton Monte Carlo uncertainty, jump-count moments, zero-jump frequency, and path convergence
+- Merton implied-volatility smiles, parameter sweeps, standard Greeks, and named jump sensitivities
+- BSM/Heston descriptive comparisons and Phase 15 market-fit support by expiry and moneyness
+- European vanilla portfolio pricing, diffusion-volatility Greeks, explicit jump-parameter shocks,
+  deterministic realized-jump stresses, and opt-in Phase 17 jump-factor histories
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
-jumps, portfolio optimization, parallelism, a GPU backend,
+non-Merton jump laws, stochastic-volatility-with-jumps, portfolio optimization, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
+
+## Merton jump diffusion
+
+Phase 18 models log jump sizes as `Y ~ N(mu_j, sigma_j²)` and the stock multiplier as
+`J = exp(Y)`. Under the risk-neutral measure,
+
+```text
+dS_t / S_(t-) = (r - q - lambda*kappa_J) dt + sigma dW_t + (J - 1) dN_t
+kappa_J = E[J - 1] = exp(mu_j + 0.5*sigma_j²) - 1
+```
+
+The compensator preserves `E[S_T] = S_0 exp((r-q)T)`. Terminal simulation draws one Poisson count,
+one diffusion normal, and one aggregate jump normal per path; it never creates a path-by-jump
+matrix. Conditional on `N_T=n`, terminal log spot has mean
+`log(S_0)+(r-q-lambda*kappa_J-0.5*sigma²)T+n*mu_j` and variance
+`sigma²T+n*sigma_j²`. The analytical engine prices that conditional lognormal distribution
+directly and weights it by stable SciPy Poisson probabilities. Truncation stops at a configured
+tail probability or maximum term count and reports omitted mass and convergence.
+
+`lambda=0` dispatches exactly to Black-Scholes-Merton. Zero jump volatility produces deterministic
+jump sizes, while zero diffusion volatility retains Poisson and jump-size uncertainty. Standard
+Merton Vega means diffusion-volatility sensitivity. Sensitivities to intensity, jump mean, and jump
+volatility are named separately. Parameter scenarios change risk-neutral model parameters; the
+optional realized log-jump stress changes spot deterministically and is kept separate from model
+probabilities. Phase 17 uses Merton factors only when the caller supplies explicit mappings and
+histories; it performs no jump detection or calibration from returns.
+
+The main endpoints are:
+
+- `POST /api/pricing/merton/analytical`
+- `POST /api/pricing/merton/monte-carlo`
+- `POST /api/analytics/merton/compare`
+- `POST /api/analytics/merton/convergence`
+- `POST /api/analytics/merton/series-convergence`
+- `POST /api/analytics/merton/smile`
+- `POST /api/analytics/merton/sensitivity`
+- `POST /api/analytics/merton/jump-diagnostics`
+- `POST /api/analytics/merton/greeks`
+
+See [docs/phase18-merton-jump-diffusion.md](docs/phase18-merton-jump-diffusion.md) for the numerical
+and integration contracts. Local measurements are recorded in
+[benchmarks/phase18-merton.md](benchmarks/phase18-merton.md).
 
 ## Portfolio VaR and Expected Shortfall
 
@@ -1695,6 +1749,12 @@ antithetic counts; component/incremental VaR and ES contribution identities; tai
 strict exception equality; Kupiec and Christoffersen boundaries; stress separation; every route;
 serialization; reproducibility; and pre-allocation rejection. Opt-in cases cover parametric models
 through 500 factors and 100k/500k Monte Carlo factor draws.
+Phase 18 tests cover parameter domains and the compensator; fixed aggregate-jump drivers; terminal
+and full-path shapes; multiple jumps per interval; theoretical stock and Poisson moments; exact BSM
+reduction; a frozen analytical benchmark; parity; large-intensity truncation; jump-only cases;
+Monte Carlo error scaled by SE; deterministic child streams; smiles, sweeps, Greeks, objective
+residuals, registry, market-fit, portfolio, scenario, Phase 17 mapping, APIs, and resource limits.
+The opt-in benchmark prices one million terminal paths and a 100-strike smile.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1709,7 +1769,8 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Constant volatility
 - Constant continuously compounded risk-free rate, which may be negative
 - Constant continuous dividend yield, which may be negative
-- No jumps; stochastic volatility is available only through the Phase 13 Heston model
+- Discontinuous returns are available through Phase 18 Merton jump diffusion; Heston remains the
+  separate stochastic-volatility model, and no combined stochastic-volatility/jump model exists
 - No transaction costs, executable-price guarantee, or discrete hedging
 - Terminal and full-path GBM simulation; LSM regression uses current stock only
 - Normal-approximation confidence intervals
@@ -1786,6 +1847,14 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Empirical VaR and ES retain the portfolio loss vector for exact selection; full-revaluation
   contribution requests are subject to stricter API limits
 - Backtest traffic-light output is descriptive and is not a Basel regulatory classification
+- Merton parameters are constant and risk-neutral; jump sizes are lognormal and arrivals are
+  independent homogeneous Poisson events independent of the diffusion Brownian motion
+- Merton analytical and terminal Monte Carlo pricing supports European vanilla contracts only
+- Merton full paths use exact independent increments on a regular grid and retain no latent jump list
+- Merton calibration is limited to a finite price-residual objective helper; no automatic fit is run
+- Generic volatility shifts change Merton diffusion volatility and never alter jump parameters
+- Explicit Merton factor histories and stresses are user inputs, not inferred realized jumps
+- Bates, Kou, infinite-activity Lévy models, and regime switching are outside Phase 18
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1808,6 +1877,6 @@ infinity.
 
 ## Roadmap
 
-Phase 18 may build on the explicit Phase 17 factor histories and loss distributions with the next
-approved research scope. Regime switching, jump diffusion, QMC, live HFT/broker integration,
-portfolio optimization, and a frontend remain unimplemented.
+Phase 19 may add regime-switching or hidden-Markov research under its own specification. Bates,
+other jump laws, QMC, live HFT/broker integration, portfolio optimization, and a frontend remain
+unimplemented.

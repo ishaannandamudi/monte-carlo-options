@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend.app.core.exceptions import PortfolioRiskError
+from backend.app.models.merton import MertonJumpParameters
 from backend.app.models.portfolio import (
     BasketPosition,
     Portfolio,
@@ -102,6 +103,26 @@ def test_explicit_heston_parameter_history_is_replayed() -> None:
     )
     result = calculate_historical_risk(
         _full_request(Portfolio(positions=[position]), mapping, [-0.005, 0.005])
+    )
+    assert result.distribution_summary.minimum_pnl != result.distribution_summary.maximum_pnl
+
+
+def test_explicit_merton_parameter_history_is_replayed() -> None:
+    position = vanilla().model_copy(
+        update={
+            "model": PortfolioPricingModel.MERTON_ANALYTICAL,
+            "merton_parameters": MertonJumpParameters(
+                jump_intensity=0.7, jump_mean=-0.12, jump_volatility=0.25
+            ),
+        }
+    )
+    mapping = RiskFactorMapping(
+        factor_id="jump_intensity",
+        factor_type=RiskFactorType.MERTON_JUMP_INTENSITY_CHANGE,
+        position_id="vanilla",
+    )
+    result = calculate_historical_risk(
+        _full_request(Portfolio(positions=[position]), mapping, [-0.1, 0.1])
     )
     assert result.distribution_summary.minimum_pnl != result.distribution_summary.maximum_pnl
 

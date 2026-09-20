@@ -58,6 +58,17 @@ def _enforce_comparison(request: ModelComparisonRequest, settings: Settings) -> 
         > settings.max_heston_total_path_nodes
     ):
         _reject("Heston path-time nodes exceed API limit")
+    selected = set(request.config.selected_models)
+    if (
+        PricingModel.MERTON_MONTE_CARLO in selected
+        and request.merton_monte_carlo.num_simulations > settings.max_merton_paths
+    ):
+        _reject("Merton paths exceed API limit")
+    if (
+        PricingModel.MERTON_ANALYTICAL in selected
+        and request.merton_series.max_terms > settings.max_merton_series_terms
+    ):
+        _reject("Merton analytical series terms exceed API limit")
     lsm = request.longstaff_schwartz
     if lsm.num_paths > settings.max_lsm_paths or lsm.training_path_count > settings.max_lsm_paths:
         _reject("Longstaff-Schwartz paths exceed API limit")
@@ -80,6 +91,17 @@ def _enforce_market_fit(request: MarketFitRequest, settings: Settings) -> None:
         _reject("Heston paths exceed API limit")
     if request.heston_monte_carlo.num_time_steps > settings.max_heston_time_steps:
         _reject("Heston time steps exceed API limit")
+    selected = set(request.selected_models)
+    if (
+        PricingModel.MERTON_MONTE_CARLO in selected
+        and request.merton_monte_carlo.num_simulations > settings.max_merton_paths
+    ):
+        _reject("Merton paths exceed API limit")
+    if (
+        PricingModel.MERTON_ANALYTICAL in selected
+        and request.merton_series.max_terms > settings.max_merton_series_terms
+    ):
+        _reject("Merton analytical series terms exceed API limit")
     observations = len(request.dataset.observations)
     if (
         PricingModel.MONTE_CARLO_GBM in request.selected_models
@@ -94,6 +116,11 @@ def _enforce_market_fit(request: MarketFitRequest, settings: Settings) -> None:
         > settings.max_heston_total_path_nodes
     ):
         _reject("aggregate Heston market-fit path-time nodes exceed API limit")
+    if (
+        PricingModel.MERTON_MONTE_CARLO in request.selected_models
+        and observations * request.merton_monte_carlo.num_simulations > settings.max_merton_paths
+    ):
+        _reject("aggregate Merton market-fit paths exceed API limit")
 
 
 @router.get("/registry", response_model=list[ModelCapabilities])
@@ -152,6 +179,8 @@ def compute_frontier_endpoint(
             nodes = max(request.budgets) * request.comparison.heston_monte_carlo.num_time_steps
         if nodes > settings.max_heston_total_path_nodes:
             _reject("compute-frontier Heston path-time nodes exceed API limit")
+    elif request.model is PricingModel.MERTON_MONTE_CARLO:
+        maximum = settings.max_merton_paths
     elif request.model is PricingModel.LONGSTAFF_SCHWARTZ:
         lsm = request.comparison.longstaff_schwartz
         if budget_type is ComputeBudgetType.TIME_STEPS:
@@ -209,6 +238,17 @@ def surface_comparison_endpoint(
         _reject("Heston paths exceed API limit")
     if request.heston_monte_carlo.num_time_steps > settings.max_heston_time_steps:
         _reject("Heston time steps exceed API limit")
+    selected = set(request.selected_models)
+    if (
+        PricingModel.MERTON_MONTE_CARLO in selected
+        and request.merton_monte_carlo.num_simulations > settings.max_merton_paths
+    ):
+        _reject("Merton paths exceed API limit")
+    if (
+        PricingModel.MERTON_ANALYTICAL in selected
+        and request.merton_series.max_terms > settings.max_merton_series_terms
+    ):
+        _reject("Merton analytical series terms exceed API limit")
     if (
         PricingModel.MONTE_CARLO_GBM in request.selected_models
         and point_count * request.gbm_monte_carlo.num_simulations > settings.max_api_simulations
@@ -222,4 +262,9 @@ def surface_comparison_endpoint(
         > settings.max_heston_total_path_nodes
     ):
         _reject("aggregate Heston surface-comparison path-time nodes exceed API limit")
+    if (
+        PricingModel.MERTON_MONTE_CARLO in request.selected_models
+        and point_count * request.merton_monte_carlo.num_simulations > settings.max_merton_paths
+    ):
+        _reject("aggregate Merton surface-comparison paths exceed API limit")
     return compare_surface(request)

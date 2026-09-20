@@ -20,6 +20,7 @@ from backend.app.models.basket import BasketType
 from backend.app.models.greeks import Greek, GreekBumpConfig, GreekMethod
 from backend.app.models.heston import HestonParameters
 from backend.app.models.market import MarketEnvironment
+from backend.app.models.merton import MertonJumpParameters
 from backend.app.models.model_comparison import PricingModel
 from backend.app.models.multi_asset import MultiAssetMarketEnvironment
 from backend.app.models.option import ExerciseStyle
@@ -90,6 +91,7 @@ from backend.app.pricing.digital import digital_analytical_price, digital_monte_
 from backend.app.pricing.heston import heston_monte_carlo_price
 from backend.app.pricing.heston_analytical import heston_analytical_price
 from backend.app.pricing.longstaff_schwartz import longstaff_schwartz_price
+from backend.app.pricing.merton import merton_analytical_price, merton_monte_carlo_price
 from backend.app.pricing.monte_carlo import MonteCarloPricer
 from backend.app.pricing.monte_carlo_greeks import monte_carlo_greeks
 from backend.app.simulation.correlation import prepare_correlation_matrix
@@ -147,6 +149,7 @@ def _deterministic_model(model: PortfolioPricingModel) -> bool:
         PortfolioPricingModel.MONTE_CARLO_GBM,
         PortfolioPricingModel.LONGSTAFF_SCHWARTZ,
         PortfolioPricingModel.HESTON_MONTE_CARLO,
+        PortfolioPricingModel.MERTON_MONTE_CARLO,
         PortfolioPricingModel.ASIAN_MONTE_CARLO,
         PortfolioPricingModel.DIGITAL_MONTE_CARLO,
         PortfolioPricingModel.BARRIER_MONTE_CARLO,
@@ -168,6 +171,12 @@ def _heston_parameters(position: VanillaPosition) -> HestonParameters:
     if position.heston_calibration_result is not None:
         return position.heston_calibration_result.calibrated_parameters
     raise PortfolioRiskError("Heston pricing requires parameters or a calibration result")
+
+
+def _merton_parameters(position: VanillaPosition) -> MertonJumpParameters:
+    if position.merton_parameters is None:
+        raise PortfolioRiskError("Merton pricing requires explicit jump parameters")
+    return position.merton_parameters
 
 
 def _effective_vanilla_market(
@@ -202,6 +211,7 @@ def _require_model(position: PortfolioPosition, model: PortfolioPricingModel) ->
                 position.heston_parameters is not None
                 or position.heston_calibration_result is not None
             ),
+            merton_parameters_available=position.merton_parameters is not None,
         )
         if exclusion is not None:
             raise PortfolioRiskError(exclusion.reason)
@@ -272,6 +282,25 @@ def _price_position(
                 lsm_result.standard_error,
                 lsm_result.confidence_interval_low,
                 lsm_result.confidence_interval_high,
+            )
+        if model is PortfolioPricingModel.MERTON_ANALYTICAL:
+            merton_analytical_result = merton_analytical_price(
+                contract, market, _merton_parameters(position), position.merton_series
+            )
+            return _Price(merton_analytical_result.price, model)
+        if model is PortfolioPricingModel.MERTON_MONTE_CARLO:
+            merton_mc_result = merton_monte_carlo_price(
+                contract,
+                market,
+                _merton_parameters(position),
+                position.merton_simulation.model_copy(update={"seed": child_seed}),
+            )
+            return _Price(
+                merton_mc_result.price,
+                model,
+                merton_mc_result.standard_error,
+                merton_mc_result.confidence_interval_low,
+                merton_mc_result.confidence_interval_high,
             )
         parameters = _heston_parameters(position)
         if model is PortfolioPricingModel.HESTON_ANALYTICAL:
@@ -1011,6 +1040,23 @@ def _apply_heston_scenario(
     return HestonParameters.model_validate(updates)
 
 
+def _apply_merton_scenario(
+    parameters: MertonJumpParameters, position_id: str, scenario: MarketScenario
+) -> MertonJumpParameters:
+    alternate = scenario.merton_parameters_by_position.get(position_id)
+    if alternate is not None:
+        return alternate
+    if scenario.merton is None:
+        return parameters
+    if scenario.merton.overrides is not None:
+        return scenario.merton.overrides
+    return MertonJumpParameters(
+        jump_intensity=parameters.jump_intensity + (scenario.merton.jump_intensity_shift or 0.0),
+        jump_mean=parameters.jump_mean + (scenario.merton.jump_mean_shift or 0.0),
+        jump_volatility=parameters.jump_volatility + (scenario.merton.jump_volatility_shift or 0.0),
+    )
+
+
 def _scenario_single(position: PositionT, scenario: MarketScenario) -> PositionT:
     assert not isinstance(position, BasketPosition)
     relative = scenario.per_underlying_spot_relative_shifts.get(
@@ -1019,7 +1065,8 @@ def _scenario_single(position: PositionT, scenario: MarketScenario) -> PositionT
     absolute = scenario.per_underlying_spot_absolute_shifts.get(
         position.underlying_id, scenario.spot_absolute_shift or 0.0
     )
-    spot = position.instrument.spot * (1.0 + relative) + absolute
+    realized_jump = math.exp(scenario.realized_jump_log_size or 0.0)
+    spot = (position.instrument.spot * (1.0 + relative) + absolute) * realized_jump
     if spot <= 0.0:
         raise PortfolioRiskError(f"scenario makes spot nonpositive for {position.position_id}")
     maturity = max(position.instrument.maturity_years - (scenario.time_shift_years or 0.0), 0.0)
@@ -1027,6 +1074,10 @@ def _scenario_single(position: PositionT, scenario: MarketScenario) -> PositionT
     is_heston = model in {
         PortfolioPricingModel.HESTON_ANALYTICAL,
         PortfolioPricingModel.HESTON_MONTE_CARLO,
+    }
+    is_merton = model in {
+        PortfolioPricingModel.MERTON_ANALYTICAL,
+        PortfolioPricingModel.MERTON_MONTE_CARLO,
     }
     volatility = (
         _effective_vanilla_market(position, maturity_years=maturity).volatility
@@ -1063,6 +1114,14 @@ def _scenario_single(position: PositionT, scenario: MarketScenario) -> PositionT
         return cast(
             PositionT,
             updated_position.model_copy(update={"heston_parameters": parameters}),
+        )
+    if isinstance(updated_position, VanillaPosition) and is_merton:
+        merton_parameters = _apply_merton_scenario(
+            _merton_parameters(updated_position), updated_position.position_id, scenario
+        )
+        return cast(
+            PositionT,
+            updated_position.model_copy(update={"merton_parameters": merton_parameters}),
         )
     return cast(PositionT, updated_position)
 
@@ -1168,6 +1227,9 @@ def _market_snapshot(position: PortfolioPosition) -> PositionMarketSnapshot:
         dividend_yields={position.underlying_id: market.dividend_yield},
         maturity_years=position.instrument.maturity_years,
         heston_parameters=heston_parameters,
+        merton_parameters=(
+            position.merton_parameters if isinstance(position, VanillaPosition) else None
+        ),
     )
 
 
@@ -1253,6 +1315,9 @@ def _position_approximation(
         flags.append(ScenarioFlag.MISSING_GREEKS)
         return None, flags
     if scenario.heston is not None or scenario.heston_parameters_by_position:
+        flags.append(ScenarioFlag.MISSING_GREEKS)
+        return None, flags
+    if scenario.merton is not None or scenario.merton_parameters_by_position:
         flags.append(ScenarioFlag.MISSING_GREEKS)
         return None, flags
     if scenario.correlation_matrix_by_position or scenario.equicorrelation_shift_by_position:

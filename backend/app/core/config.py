@@ -43,12 +43,18 @@ class Settings(BaseModel):
     max_heston_convergence_points: int = Field(default=20, gt=0)
     max_heston_smile_points: int = Field(default=200, gt=0)
     max_heston_sensitivity_points: int = Field(default=100, gt=0)
+    max_merton_paths: int = Field(default=5_000_000, gt=0)
+    max_merton_series_terms: int = Field(default=10_000, gt=0)
+    max_merton_convergence_points: int = Field(default=20, gt=0)
+    max_merton_smile_points: int = Field(default=500, gt=0)
+    max_merton_sensitivity_points: int = Field(default=100, gt=0)
+    max_merton_path_nodes: int = Field(default=25_000_000, gt=0)
     max_heston_calibration_observations: int = Field(default=250, gt=0)
     max_heston_calibration_starts: int = Field(default=10, gt=0)
     max_heston_calibration_iterations: int = Field(default=500, gt=0)
     max_heston_calibration_surface_points: int = Field(default=500, gt=0)
     max_heston_calibration_diagnostic_points: int = Field(default=500, gt=0)
-    max_model_comparison_models: int = Field(default=7, gt=0)
+    max_model_comparison_models: int = Field(default=9, gt=0)
     max_model_comparison_observations: int = Field(default=500, gt=0)
     max_model_comparison_surface_points: int = Field(default=1_000, gt=0)
     max_model_comparison_experiment_points: int = Field(default=20, gt=0)
@@ -57,7 +63,7 @@ class Settings(BaseModel):
     max_portfolio_scenario_points: int = Field(default=1_000, gt=0)
     max_portfolio_grid_points: int = Field(default=2_500, gt=0)
     max_portfolio_stress_scenarios: int = Field(default=100, gt=0)
-    max_portfolio_model_risk_models: int = Field(default=7, gt=0)
+    max_portfolio_model_risk_models: int = Field(default=9, gt=0)
     max_risk_historical_scenarios: int = Field(default=10_000, gt=0)
     max_risk_monte_carlo_simulations: int = Field(default=1_000_000, gt=0)
     max_risk_positions: int = Field(default=1_000, gt=0)
@@ -100,6 +106,12 @@ class Settings(BaseModel):
             "max_heston_convergence_points",
             "max_heston_smile_points",
             "max_heston_sensitivity_points",
+            "max_merton_paths",
+            "max_merton_series_terms",
+            "max_merton_convergence_points",
+            "max_merton_smile_points",
+            "max_merton_sensitivity_points",
+            "max_merton_path_nodes",
             "max_heston_calibration_observations",
             "max_heston_calibration_starts",
             "max_heston_calibration_iterations",

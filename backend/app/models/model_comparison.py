@@ -21,6 +21,11 @@ from backend.app.models.heston_calibration import (
 )
 from backend.app.models.longstaff_schwartz import LongstaffSchwartzConfig
 from backend.app.models.market import MarketEnvironment
+from backend.app.models.merton import (
+    MertonJumpParameters,
+    MertonSeriesConfig,
+    MertonSimulationConfig,
+)
 from backend.app.models.option import OptionContract
 from backend.app.models.simulation import SimulationConfig
 from backend.app.models.volatility_surface import VolatilitySurface
@@ -41,6 +46,8 @@ class PricingModel(StrEnum):
     HESTON_MONTE_CARLO = "HESTON_MONTE_CARLO"
     CRR_AMERICAN = "CRR_AMERICAN"
     LONGSTAFF_SCHWARTZ = "LONGSTAFF_SCHWARTZ"
+    MERTON_ANALYTICAL = "MERTON_ANALYTICAL"
+    MERTON_MONTE_CARLO = "MERTON_MONTE_CARLO"
 
 
 class ModelCostClass(StrEnum):
@@ -108,6 +115,7 @@ class ModelCapabilities(ComparisonModel):
     supports_put: bool = True
     supports_dividends: bool = True
     supports_stochastic_volatility: bool
+    supports_jump_diffusion: bool = False
     supports_closed_form_or_semi_analytical: bool
     supports_monte_carlo: bool
     supports_greeks: bool
@@ -182,6 +190,9 @@ class ModelComparisonRequest(ComparisonModel):
     heston_monte_carlo: HestonSimulationConfig = Field(default_factory=HestonSimulationConfig)
     heston_integration: HestonIntegrationConfig = Field(default_factory=HestonIntegrationConfig)
     longstaff_schwartz: LongstaffSchwartzConfig = Field(default_factory=LongstaffSchwartzConfig)
+    merton_parameters: MertonJumpParameters | None = None
+    merton_monte_carlo: MertonSimulationConfig = Field(default_factory=MertonSimulationConfig)
+    merton_series: MertonSeriesConfig = Field(default_factory=MertonSeriesConfig)
 
 
 class ModelExclusion(ComparisonModel):
@@ -397,6 +408,7 @@ class MarketFitRequest(ComparisonModel):
     selected_models: list[PricingModel] = Field(min_length=1)
     heston_parameters: HestonParameters | None = None
     heston_calibration_result: HestonCalibrationResult | None = None
+    merton_parameters: MertonJumpParameters | None = None
     black_scholes_volatility: float = Field(default=0.20, ge=0.0)
     use_observed_iv_for_black_scholes: bool = False
     preprocessing: HestonCalibrationConfig = Field(default_factory=HestonCalibrationConfig)
@@ -408,6 +420,10 @@ class MarketFitRequest(ComparisonModel):
     heston_monte_carlo: HestonSimulationConfig = Field(
         default_factory=lambda: HestonSimulationConfig(num_simulations=5_000, num_time_steps=25)
     )
+    merton_monte_carlo: MertonSimulationConfig = Field(
+        default_factory=lambda: MertonSimulationConfig(num_simulations=10_000)
+    )
+    merton_series: MertonSeriesConfig = Field(default_factory=MertonSeriesConfig)
     max_returned_residuals: PositiveInt = 500
     relative_price_floor: float = Field(default=1e-8, gt=0.0)
     observation_labels: dict[int, str] = Field(default_factory=dict)
@@ -474,6 +490,7 @@ class ComputeFrontierRequest(ComparisonModel):
                 ComputeBudgetType.PATHS,
                 ComputeBudgetType.TIME_STEPS,
             },
+            PricingModel.MERTON_MONTE_CARLO: {ComputeBudgetType.PATHS},
         }
         if self.model not in allowed:
             raise ValueError("selected model has no compute-frontier budget")
@@ -633,6 +650,7 @@ class SurfaceComparisonRequest(ComparisonModel):
     )
     heston_parameters: HestonParameters | None = None
     heston_calibration_result: HestonCalibrationResult | None = None
+    merton_parameters: MertonJumpParameters | None = None
     tree: BinomialTreeConfig = Field(default_factory=BinomialTreeConfig)
     integration: HestonIntegrationConfig = Field(default_factory=HestonIntegrationConfig)
     gbm_monte_carlo: SimulationConfig = Field(
@@ -641,6 +659,10 @@ class SurfaceComparisonRequest(ComparisonModel):
     heston_monte_carlo: HestonSimulationConfig = Field(
         default_factory=lambda: HestonSimulationConfig(num_simulations=5_000, num_time_steps=25)
     )
+    merton_monte_carlo: MertonSimulationConfig = Field(
+        default_factory=lambda: MertonSimulationConfig(num_simulations=5_000)
+    )
+    merton_series: MertonSeriesConfig = Field(default_factory=MertonSeriesConfig)
     max_returned_residuals: PositiveInt = 500
 
     @model_validator(mode="after")

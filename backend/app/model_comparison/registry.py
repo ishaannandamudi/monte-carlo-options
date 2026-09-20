@@ -25,12 +25,14 @@ def _cap(
     factors: int,
     parameter_count: int,
     integration: bool = False,
+    jump_diffusion: bool = False,
 ) -> ModelCapabilities:
     return ModelCapabilities(
         model=model,
         supports_european=european,
         supports_american=american,
         supports_stochastic_volatility=stochastic_volatility,
+        supports_jump_diffusion=jump_diffusion,
         supports_closed_form_or_semi_analytical=analytical,
         supports_monte_carlo=monte_carlo,
         supports_greeks=greeks,
@@ -153,6 +155,38 @@ _CAPABILITIES: dict[PricingModel, ModelCapabilities] = {
         factors=1,
         parameter_count=1,
     ),
+    PricingModel.MERTON_ANALYTICAL: _cap(
+        PricingModel.MERTON_ANALYTICAL,
+        european=True,
+        american=False,
+        stochastic_volatility=False,
+        analytical=True,
+        monte_carlo=False,
+        greeks=True,
+        calibration=False,
+        deterministic=True,
+        cost=ModelCostClass.LOW,
+        states=1,
+        factors=2,
+        parameter_count=4,
+        jump_diffusion=True,
+    ),
+    PricingModel.MERTON_MONTE_CARLO: _cap(
+        PricingModel.MERTON_MONTE_CARLO,
+        european=True,
+        american=False,
+        stochastic_volatility=False,
+        analytical=False,
+        monte_carlo=True,
+        greeks=False,
+        calibration=False,
+        deterministic=False,
+        cost=ModelCostClass.MEDIUM,
+        states=1,
+        factors=2,
+        parameter_count=4,
+        jump_diffusion=True,
+    ),
 }
 
 
@@ -175,6 +209,7 @@ def compatibility_exclusion(
     contract: OptionContract,
     *,
     heston_parameters_available: bool,
+    merton_parameters_available: bool = False,
 ) -> ModelExclusion | None:
     capability = model_capabilities(model)
     if contract.exercise_style is ExerciseStyle.EUROPEAN and not capability.supports_european:
@@ -186,4 +221,8 @@ def compatibility_exclusion(
             model=model,
             reason="model requires explicit Heston parameters or a calibration result",
         )
+    if model in {PricingModel.MERTON_ANALYTICAL, PricingModel.MERTON_MONTE_CARLO} and not (
+        merton_parameters_available
+    ):
+        return ModelExclusion(model=model, reason="model requires explicit Merton parameters")
     return None
