@@ -24,6 +24,9 @@ Phase 15 adds a capability-aware registry and a research comparison layer across
 Carlo, European/American CRR, Longstaff-Schwartz, and analytical/Monte Carlo Heston. It reports
 price and Greek dispersion, equivalent IV, market fit, quote-spread diagnostics, compute frontiers,
 calibration uncertainty, theoretical consistency checks, and explicit model-risk flags.
+Phase 16 adds typed mixed-instrument portfolios, signed quantities, mark-to-model valuation,
+canonical and scaled Greek aggregation, exposure groupings, deterministic scenario/stress grids,
+full repricing, local Greek approximations, P&L explain, and portfolio model-spread analysis.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -120,10 +123,22 @@ currency-safe decimal amounts.
 - Accuracy-versus-compute frontiers in each engine's natural budget variable
 - Heston calibration-ensemble valuation dispersion and local covariance propagation
 - Input-perturbation stability, cross-engine consistency checks, and typed model-risk reports
+- Mixed European, American, Asian, digital, barrier, and basket portfolios with explicit models
+- Signed position quantities, gross long/short value, net value, and isolated position failures
+- Position and portfolio Delta, Gamma, raw Vega, calendar Theta, and raw Rho where available
+- Net/gross Greeks plus dollar Delta, one-percent Delta/Gamma, one-vol-point Vega, daily Theta,
+  and one-percent Rho scaling
+- Value and risk grouping by underlying, expiry, option type, instrument class, and pricing model
+- Per-asset basket Delta from Common-Random-Number finite differences; no fabricated cross-Gamma
+- Spot, volatility, rate, dividend, time, Heston-parameter, correlation, and per-asset scenarios
+- Authoritative full repricing with local Greek approximations and explicit higher-order residuals
+- Ordered one- and multi-dimensional scenario grids, named stresses, and contribution identities
+- Position and portfolio P&L explain plus descriptive Phase 15 model-spread integration
+- Explicit Phase 6 sticky-strike BSM surface valuation and Phase 14 calibrated-Heston references
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
-jumps, cross-model comparison, portfolio risk, parallelism, a GPU backend,
+jumps, VaR, Expected Shortfall, portfolio optimization, parallelism, a GPU backend,
 quasi-Monte Carlo, and a frontend.
 
 ## Mathematical model
@@ -1045,6 +1060,25 @@ POST /api/analytics/models/consistency
 POST /api/analytics/models/surface-comparison
 ```
 
+Phase 16 portfolio routes are:
+
+```text
+POST /api/portfolio/value
+POST /api/portfolio/greeks
+POST /api/portfolio/scenario
+POST /api/portfolio/scenario-grid
+POST /api/portfolio/stress
+POST /api/portfolio/pnl-explain
+POST /api/portfolio/model-risk
+```
+
+Each position carries a typed instrument, explicit market snapshot, signed quantity, optional
+pricing model, and model-specific numerical configuration. Omitted models follow the documented
+policy: BSM for European vanilla, American CRR for American vanilla, analytical pricing for
+digitals and supported geometric payoffs, and Monte Carlo for arithmetic Asians, barriers, and
+arithmetic baskets. Incompatible explicit models produce a structured position failure; they are
+never silently replaced.
+
 A minimal comparison request supplies `contract`, `market`, and
 `config.selected_models`. Optional fields carry Heston parameters or a calibration result and the
 existing GBM, tree, Heston, or LSM numerical configurations. Public responses contain bounded
@@ -1148,6 +1182,13 @@ Available endpoints:
 - `POST /api/analytics/heston/calibration/fitted-surface`
 - `POST /api/analytics/heston/calibration/stability`
 - `POST /api/analytics/heston/calibration/validate`
+- `POST /api/portfolio/value`
+- `POST /api/portfolio/greeks`
+- `POST /api/portfolio/scenario`
+- `POST /api/portfolio/scenario-grid`
+- `POST /api/portfolio/stress`
+- `POST /api/portfolio/pnl-explain`
+- `POST /api/portfolio/model-risk`
 
 Calibrate a small IV dataset in bounded native Heston parameter space:
 
@@ -1487,6 +1528,11 @@ Model-comparison limits cap requested engines, observation and surface grids, co
 points, returned residuals, and timing repetitions. Existing engine-specific path, node, tree-step,
 and Heston limits are enforced on nested configurations before work starts.
 
+Portfolio limits cap positions, scenario coordinates, Cartesian grid cells, stress definitions,
+and alternate models. Existing path, monitoring, tree, LSM, Heston, and multi-asset node limits are
+also checked for each nested position before valuation. Scenario products are checked before cells
+are allocated.
+
 ## Tests and quality checks
 
 ```bash
@@ -1583,10 +1629,12 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Discrete barriers can miss between-date crossings; bridge mode corrects this only for constant-volatility GBM
 - Bridge survival weighting supports expiry rebates but rejects positive hit-time rebates
 - Continuous barrier formulas support zero rebate; bridge hit-time moments are unavailable
-- Barrier Greeks, double barriers, and stochastic-volatility bridge corrections are not implemented
+- Standalone closed-form barrier Greeks remain absent; the portfolio layer can finite-difference
+  its assigned barrier engine. Double barriers and stochastic-volatility bridges are absent
 - Basket weights are nonnegative and normalized; signed spread portfolios are not modeled
 - Cross-asset dependence is a constant Gaussian correlation matrix
-- Basket Deltas, per-asset Vegas, cross-Gammas, and correlation Greeks are deferred
+- Phase 16 supplies basket per-asset Delta with CRN finite differences; per-asset Vegas,
+  cross-Gammas, and correlation Greeks remain deferred
 - Correlation sensitivity is an equicorrelation scenario diagnostic, not a claimed exact Greek
 - Terminal basket pricing is European; basket barriers and basket Asians are not implemented
 - Heston pricing supports European vanilla terminal payoffs; American and exotic Heston payoffs are absent
@@ -1606,6 +1654,19 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Runtime measurements depend on the host and are descriptive medians rather than service guarantees
 - Heston covariance propagation is local and linear; ensemble dispersion depends on supplied fits
 - Model-risk flags are threshold diagnostics, not ratings or automated model approvals
+- Portfolio Vega and Rho use raw absolute model units; scaled values are separately named
+- Portfolio Theta is calendar-time Theta per year; `theta_1day` divides it by 365
+- Basket value and scenario P&L grouping uses contractual weights as a reporting allocation;
+  per-asset Delta is directly bumped, while cross-Gamma and per-asset Vega remain unavailable
+- Generic volatility shocks do not alter Heston parameters; Heston scenarios name parameter shifts
+- Full repricing is authoritative. Greek approximations omit vanna, volga, charm, cross-Gamma,
+  rate/volatility interactions, correlation risk, and other higher-order terms
+- Barrier scenarios assume the existing unhit/current-state contract; past barrier hits are absent
+- Asian forward-time scenarios do not model historical fixings or partially observed averages
+- Surface-based portfolio BSM valuation is opt-in and uses a sticky-strike Phase 6 query
+- Portfolio market inputs are explicit snapshots; `market_data_reference` is provenance only and
+  no live market-data fetch occurs during portfolio valuation
+- Model-price spread is descriptive rather than probabilistic risk
 - CRR probability can be invalid for coarse steps or extreme carry/volatility combinations
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
@@ -1628,10 +1689,7 @@ infinity.
 
 ## Roadmap
 
-Phase 16 can consume Phase 15's explicit price, Greek, calibration, numerical, and market-spread
-uncertainty categories when adding portfolio aggregation and risk. Later phases can add parametric
-surface fitting, quote-repair policy, additional variance-reduction techniques, richer stopping
-policies, jump diffusion, regime switching, performance work, quasi-Monte Carlo, and eventually an
-interactive dashboard. Those features are architectural consumers of the existing contract,
-process, payoff, pricing, RNG, cluster, Greek, volatility, and normalized market-data boundaries;
-none are implemented in Phase 15.
+Phase 17 can add historical, parametric, and Monte Carlo VaR, Expected Shortfall, and validation on
+top of Phase 16's explicit portfolio/scenario boundary. HFT or live risk integration begins only
+after this milestone. Later phases can add parametric surface fitting, quote repair, jump diffusion,
+regime switching, quasi-Monte Carlo, and an interactive dashboard. None are implemented in Phase 16.

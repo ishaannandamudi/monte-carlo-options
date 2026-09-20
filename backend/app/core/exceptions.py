@@ -45,6 +45,10 @@ class SensitivityGridError(QuantitativeError):
     """Raised when a sensitivity grid contains an invalid model value."""
 
 
+class PortfolioRiskError(QuantitativeError):
+    """Raised for invalid portfolio dispatch, scenario, or aggregation operations."""
+
+
 class ImpliedVolatilityError(QuantitativeError):
     """Base class for an implied-volatility inversion failure."""
 
