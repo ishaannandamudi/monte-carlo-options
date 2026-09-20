@@ -79,6 +79,12 @@ class Settings(BaseModel):
     max_hmm_model_order_candidates: int = Field(default=10, gt=0)
     max_hmm_probability_output_points: int = Field(default=10_000, gt=0)
     max_regime_risk_simulations: int = Field(default=1_000_000, gt=0)
+    max_qmc_samples: int = Field(default=1_048_576, gt=0)
+    max_qmc_dimension: int = Field(default=2_048, gt=0)
+    max_qmc_replicates: int = Field(default=32, gt=0)
+    max_qmc_total_coordinates: int = Field(default=50_000_000, gt=0)
+    max_qmc_convergence_points: int = Field(default=20, gt=0)
+    max_qmc_diagnostic_output_points: int = Field(default=100, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -150,6 +156,12 @@ class Settings(BaseModel):
             "max_hmm_model_order_candidates",
             "max_hmm_probability_output_points",
             "max_regime_risk_simulations",
+            "max_qmc_samples",
+            "max_qmc_dimension",
+            "max_qmc_replicates",
+            "max_qmc_total_coordinates",
+            "max_qmc_convergence_points",
+            "max_qmc_diagnostic_output_points",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value

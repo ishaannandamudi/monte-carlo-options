@@ -37,6 +37,10 @@ class RegimeModelError(QuantitativeError):
     """Raised for invalid or numerically unsafe Markov/HMM operations."""
 
 
+class QMCError(QuantitativeError):
+    """Raised for invalid or numerically unsafe quasi-Monte Carlo operations."""
+
+
 class HestonCalibrationError(HestonPricingError):
     """Raised for invalid datasets or unsuccessful Heston calibration operations."""
 

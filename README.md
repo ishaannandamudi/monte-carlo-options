@@ -37,6 +37,9 @@ explicit risk-factor integration.
 Phase 19 adds finite Markov-chain diagnostics and Gaussian hidden Markov models for real-world
 latent-regime research, including log-space filtering/smoothing, Viterbi decoding, deterministic
 multi-start Baum-Welch estimation, probability forecasts, and regime-conditioned VaR/ES.
+Phase 20 adds SciPy Sobol and scrambled-Sobol numerical integration, replicate-based randomized-QMC
+uncertainty, Brownian-bridge and PCA path construction, QMC European/Asian/basket pricing, and
+method-comparison and convergence-rate research.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -173,11 +176,20 @@ currency-safe decimal amounts.
 - State-conditional normal risk and sampled Gaussian-mixture VaR/ES without averaging state VaRs
 - Phase 15 residual grouping, unchanged Phase 16 stress context, and Phase 17 loss conventions
 - Separate real-world Markov-switching GBM research simulation with no pricing-drift substitution
+- Explicit pseudorandom, deterministic Sobol, and independently scrambled Sobol sampling methods
+- Required, round-up, and arbitrary Sobol power-of-two policies plus explicit fast-forward offsets
+- Finite inverse-normal transformation with documented floating-point endpoint clipping
+- RQMC standard errors and confidence intervals computed only from independent scramble estimates
+- Terminal GBM and correlated multi-asset QMC through existing deterministic driver interfaces
+- Chronological, Brownian-bridge, and PCA Brownian path construction for discrete Asian options
+- Geometric Asian and basket analytical references plus optional within-replicate geometric controls
+- MC/Sobol/RQMC compute frontiers, analytical errors, efficiency metrics, and empirical slopes
+- Bounded discrepancy, PCA variance-concentration, seed-provenance, and sampling diagnostics
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
 non-Merton jump laws, stochastic-volatility-with-jumps, portfolio optimization, parallelism, a GPU backend,
-quasi-Monte Carlo, and a frontend.
+QMC Heston/barrier/tail-risk workflows, and a frontend.
 
 ## Latent regimes and Gaussian HMMs
 
@@ -211,6 +223,39 @@ Main endpoints:
 See [docs/phase19-regime-hmm.md](docs/phase19-regime-hmm.md) for algorithms, edge policies,
 look-ahead rules, and integration boundaries. Performance methodology is in
 [benchmarks/phase19-regime-hmm.md](benchmarks/phase19-regime-hmm.md).
+
+## Sobol and randomized quasi-Monte Carlo
+
+Phase 20 uses SciPy's Sobol implementation. Deterministic Sobol is an integration rule and therefore
+returns no fabricated classical standard error. Randomized QMC derives independent scrambling seeds
+from `SeedSequence`; its estimate is the mean of scramble estimates and its standard error is their
+sample standard deviation divided by the square root of the replicate count.
+
+Sobol sample-count behavior is explicit: require a power of two, round up to one, or allow the
+requested arbitrary count with weaker balance guarantees. Uniform coordinates are clipped by one
+float64 machine epsilon before `ndtri`, preventing infinities at zero and one. Fast-forward is
+recorded as a sequence offset and is not treated as independent scrambling.
+
+Terminal European GBM uses one coordinate. Correlated baskets use one coordinate per asset and
+reuse the Phase 12 correlation factor. Discrete Asians support chronological increments, recursive
+terminal-first Brownian bridges, and descending-eigenvalue PCA paths. The QMC Brownian bridge
+changes coordinate ordering; it is separate from the barrier crossing-probability correction.
+Bridge ordering and PCA variance concentration are practical effective-dimension diagnostics, not
+full ANOVA decompositions. The convergence endpoints compare pseudorandom MC, Sobol, and RQMC at
+matched powers of two. Digital/barrier discontinuities and VaR/ES tail quantiles may weaken QMC
+benefits, so those established pseudorandom workflows remain unchanged in Phase 20.
+
+Main endpoints:
+
+- `POST /api/pricing/qmc/european`
+- `POST /api/pricing/qmc/asian`
+- `POST /api/pricing/qmc/basket`
+- `POST /api/analytics/qmc/sampling`
+- `POST /api/analytics/qmc/convergence`
+- `POST /api/analytics/qmc/compare`
+
+See [docs/phase20-qmc-numerics.md](docs/phase20-qmc-numerics.md) for estimator and path-construction
+details. Measurements are in [benchmarks/phase20-qmc.md](benchmarks/phase20-qmc.md).
 
 ## Merton jump diffusion
 
@@ -1731,6 +1776,11 @@ scenarios. The API checks these products before factor generation, repricing, or
 then applies every existing nested pricing-engine limit. Library calls remain available for
 deliberate larger research workloads.
 
+QMC limits cap the effective sample count after any explicit power-of-two rounding, dimension,
+independent scrambles, total requested coordinates, convergence points, and returned diagnostic
+points before generation. Centered discrepancy is omitted outside its smaller documented workload
+bounds because its cost differs from ordinary point generation.
+
 ## Tests and quality checks
 
 ```bash
@@ -1808,6 +1858,11 @@ EM monotonicity, covariance floors, deterministic multi-start recovery, canonica
 multivariate covariance, look-ahead-safe filtering, walk-forward scoring, Phase 15/16/17
 integrations, every API route, response bounds, and real-world switching-GBM reproducibility. Opt-in
 cases cover 1,000 and 10,000 observations with two and four states.
+Phase 20 tests cover Sobol nesting, scrambling and seed replay, all power-of-two policies, finite
+inverse-normal transforms, Brownian-bridge reconstruction, PCA covariance, European/Asian/basket
+analytical comparisons, replicate-level randomized-QMC uncertainty, geometric controls, method
+frontiers and slopes, metadata signatures, every route, and resource caps. Opt-in cases cover a
+262,144-point European rule, 32,768 paths across 52 Asian dates, and 131,072 ten-asset basket paths.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1934,6 +1989,6 @@ infinity.
 
 ## Roadmap
 
-Phase 20 may address Sobol or other quasi-Monte Carlo research under its own specification. Bates,
-other jump laws, switching Heston/Merton, live HFT/broker integration, portfolio optimization, and
-a frontend remain unimplemented.
+Phase 21 may add experiment tracking and artifact lineage under its own specification. Bates, other
+jump laws, switching Heston/Merton, QMC Heston/barrier/tail-risk extensions, live HFT/broker
+integration, portfolio optimization, and a frontend remain unimplemented.
