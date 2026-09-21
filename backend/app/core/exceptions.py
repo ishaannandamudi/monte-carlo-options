@@ -41,6 +41,14 @@ class QMCError(QuantitativeError):
     """Raised for invalid or numerically unsafe quasi-Monte Carlo operations."""
 
 
+class ExperimentError(QuantitativeError):
+    """Raised for invalid, unsafe, or inconsistent research experiment operations."""
+
+
+class ExperimentNotFoundError(ExperimentError):
+    """Raised when a requested experiment run does not exist."""
+
+
 class HestonCalibrationError(HestonPricingError):
     """Raised for invalid datasets or unsuccessful Heston calibration operations."""
 

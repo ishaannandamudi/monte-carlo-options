@@ -85,6 +85,18 @@ class Settings(BaseModel):
     max_qmc_total_coordinates: int = Field(default=50_000_000, gt=0)
     max_qmc_convergence_points: int = Field(default=20, gt=0)
     max_qmc_diagnostic_output_points: int = Field(default=100, gt=0)
+    experiment_db_path: str = ".research/experiments.sqlite3"
+    experiment_artifact_dir: str = ".research/artifacts"
+    max_experiment_runs_per_sweep: int = Field(default=100, gt=0)
+    max_experiment_repetitions: int = Field(default=32, gt=0)
+    max_experiment_metrics: int = Field(default=200, gt=0)
+    max_experiment_artifacts: int = Field(default=20, gt=0)
+    max_experiment_result_bytes: int = Field(default=1_000_000, gt=0)
+    max_experiment_artifact_bytes: int = Field(default=10_000_000, gt=0)
+    max_experiment_notes_length: int = Field(default=10_000, gt=0)
+    max_experiment_tags: int = Field(default=20, gt=0)
+    max_experiment_page_size: int = Field(default=100, gt=0)
+    max_benchmark_repetitions: int = Field(default=100, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
@@ -162,6 +174,16 @@ class Settings(BaseModel):
             "max_qmc_total_coordinates",
             "max_qmc_convergence_points",
             "max_qmc_diagnostic_output_points",
+            "max_experiment_runs_per_sweep",
+            "max_experiment_repetitions",
+            "max_experiment_metrics",
+            "max_experiment_artifacts",
+            "max_experiment_result_bytes",
+            "max_experiment_artifact_bytes",
+            "max_experiment_notes_length",
+            "max_experiment_tags",
+            "max_experiment_page_size",
+            "max_benchmark_repetitions",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value
@@ -187,6 +209,14 @@ class Settings(BaseModel):
             values["max_binomial_convergence_points"] = value
         if value := os.getenv("MAX_OPTION_CHAIN_CONTRACTS"):
             values["max_option_chain_contracts"] = value
+        if value := os.getenv("EXPERIMENT_DB_PATH"):
+            values["experiment_db_path"] = value
+        if value := os.getenv("EXPERIMENT_ARTIFACT_DIR"):
+            values["experiment_artifact_dir"] = value
+        if "max_experiment_runs_per_sweep" not in values and (
+            value := os.getenv("MAX_EXPERIMENT_SWEEP_RUNS")
+        ):
+            values["max_experiment_runs_per_sweep"] = value
         if value := os.getenv("MAX_QUOTE_AGE_SECONDS"):
             values["max_quote_age_seconds"] = value
         if value := os.getenv("MARKET_DATA_PROVIDER"):

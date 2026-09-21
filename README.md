@@ -40,6 +40,9 @@ multi-start Baum-Welch estimation, probability forecasts, and regime-conditioned
 Phase 20 adds SciPy Sobol and scrambled-Sobol numerical integration, replicate-based randomized-QMC
 uncertainty, Brownian-bridge and PCA path construction, QMC European/Asian/basket pricing, and
 method-comparison and convergence-rate research.
+Phase 21 adds a local research experiment layer with deterministic input signatures, environment
+and Git provenance, seed lineage, SQLite persistence, repeated trials, Cartesian sweeps, benchmark
+records, run comparison, reproducibility replay, metric history, and bounded artifact metadata.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -185,11 +188,58 @@ currency-safe decimal amounts.
 - Geometric Asian and basket analytical references plus optional within-replicate geometric controls
 - MC/Sobol/RQMC compute frontiers, analytical errors, efficiency metrics, and empirical slopes
 - Bounded discrepancy, PCA variance-concentration, seed-provenance, and sampling diagnostics
+- Typed experiment definitions and immutable completed run records in a versioned SQLite store
+- Exact canonical SHA-256 signatures over execution inputs, numerical configuration, and seeds
+- Secret-safe environment, dependency, application-version, and Git metadata snapshots
+- Deterministic `SeedSequence` child lineage for stochastic repeats and Cartesian parameter sweeps
+- Generic scalar metrics, bounded JSON summaries, hashed file artifacts, and parent/child lineage
+- Warmed repeated benchmarks with engine, tracking, and total runtime separated
+- Bounded recursive run/config/result comparison, metric history, and tolerance-based replay checks
+- Searchable and paginated experiment APIs with type, status, tag, date, signature, and metric sort
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
 non-Merton jump laws, stochastic-volatility-with-jumps, portfolio optimization, parallelism, a GPU backend,
 QMC Heston/barrier/tail-risk workflows, and a frontend.
+
+## Research experiments and reproducibility
+
+Phase 21 wraps existing Phase 1-20 services; it does not copy their pricing or risk logic. An
+`ExperimentDefinition` names a supported operation and carries its typed-engine input as bounded
+JSON. The runner records `PENDING -> RUNNING -> COMPLETED` or `FAILED`, writes final summary and
+metrics in one SQLite transaction, and preserves completed numerical records as immutable history.
+Tags and notes are the only mutable annotations in the library store.
+
+Signatures use canonical JSON with sorted mappings, enum values, Pydantic normalization, and exact
+round-trip JSON float representations. They include financial inputs, model/numerical/sampling
+configuration, and relevant seeds; timestamps, notes, tags, descriptions, display names, and
+metadata do not affect identity. Keys containing `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, or
+`CREDENTIAL` are redacted before persistence and signature calculation. Environment snapshots use
+an allowlist and record Python, the application version, inexpensive package versions, platform,
+and Git commit/dirty state where available.
+
+Repeated stochastic trials and sweep points derive independent reproducible child seeds from
+`SeedSequence(root_seed)`. Parent records retain the child IDs and seed lineage. Repeat aggregates
+contain mean, sample standard deviation, minimum, maximum, median, and standard error for every
+non-performance metric. Cartesian sweep order follows the declared axes and value order and is
+validated against a configured total-run ceiling before any child executes.
+
+Benchmark runs perform explicit warmups followed by measured `perf_counter` repetitions and store
+the timing sample, mean, median, p95, minimum, and maximum. Warmups are excluded from measured
+engine time. Every run distinguishes engine runtime, tracking overhead, and total duration.
+Optional baselines and explicit thresholds add descriptive flags without declaring a regression
+when no threshold was requested.
+
+The default database is `.research/experiments.sqlite3`; referenced artifacts live under
+`.research/artifacts/<run_id>/`. SQLite uses foreign keys, WAL mode, short-lived connections,
+indexes for common filters, and an explicit schema-version table. Artifact filenames are sanitized,
+content is size-bounded and SHA-256 hashed, and existing files are never overwritten. Full raw path
+matrices are never stored. Oversized structured results are reduced to a bounded scalar summary.
+JSON run export is available; import and CSV export are intentionally deferred.
+
+See [docs/phase21-experiment-tracking.md](docs/phase21-experiment-tracking.md) for the storage,
+identity, lineage, and failure contracts. Local measurements are in
+[benchmarks/phase21-experiment-tracking.md](benchmarks/phase21-experiment-tracking.md).
 
 ## Latent regimes and Gaussian HMMs
 
@@ -1029,6 +1079,7 @@ backend/app/
 ├── pricing/       # analytical, Monte Carlo, tree, LSM, exotic, basket, and Heston engines
 ├── portfolio/     # mixed-position valuation, Greeks, scenarios, stress, and P&L explain
 ├── risk/          # VaR/ES estimators, factor simulation, contributions, and backtesting
+├── research/      # signatures, SQLite runs, dispatcher, sweeps, benchmarks, and comparisons
 ├── simulation/    # GBM/Heston processes, correlation factors, CRN, and RNG ownership
 └── volatility_surface/ # total-variance construction, queries, and synthetic fixtures
 backend/tests/     # deterministic, numerical, statistical, and HTTP tests
@@ -1261,6 +1312,29 @@ Health check:
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+Phase 21 research routes are:
+
+```text
+POST /api/experiments/run
+GET  /api/experiments
+GET  /api/experiments/{run_id}
+POST /api/experiments/compare
+POST /api/experiments/{run_id}/reproduce
+GET  /api/experiments/{run_id}/metrics
+GET  /api/experiments/metrics/history
+GET  /api/experiments/{run_id}/artifacts
+GET  /api/experiments/{run_id}/export
+POST /api/experiments/sweep
+POST /api/experiments/benchmark
+```
+
+Configure local storage and limits with `EXPERIMENT_DB_PATH`, `EXPERIMENT_ARTIFACT_DIR`,
+`MAX_EXPERIMENT_RUNS_PER_SWEEP`, `MAX_EXPERIMENT_REPETITIONS`, `MAX_EXPERIMENT_METRICS`,
+`MAX_EXPERIMENT_ARTIFACTS`, `MAX_EXPERIMENT_RESULT_BYTES`, `MAX_EXPERIMENT_ARTIFACT_BYTES`,
+`MAX_EXPERIMENT_NOTES_LENGTH`, `MAX_EXPERIMENT_TAGS`, `MAX_EXPERIMENT_PAGE_SIZE`, and
+`MAX_BENCHMARK_REPETITIONS`. The legacy specification spelling `MAX_EXPERIMENT_SWEEP_RUNS` is also
+accepted when the primary sweep setting is absent.
 
 Phase 15 research routes are:
 
@@ -1781,6 +1855,11 @@ independent scrambles, total requested coordinates, convergence points, and retu
 points before generation. Centered discrepancy is omitted outside its smaller documented workload
 bounds because its cost differs from ordinary point generation.
 
+Experiment limits cap repetitions, total Cartesian child executions, scalar metrics, artifacts,
+artifact/result bytes, annotations, list pages, and benchmark repetitions. Nested engine requests
+also pass their existing Phase 1-20 API resource checks. The local store has no automatic pruning;
+database and artifact retention are an operator responsibility.
+
 ## Tests and quality checks
 
 ```bash
@@ -1863,6 +1942,13 @@ inverse-normal transforms, Brownian-bridge reconstruction, PCA covariance, Europ
 analytical comparisons, replicate-level randomized-QMC uncertainty, geometric controls, method
 frontiers and slopes, metadata signatures, every route, and resource caps. Opt-in cases cover a
 262,144-point European rule, 32,768 paths across 52 Asian dates, and 131,072 ten-asset basket paths.
+Phase 21 tests cover canonical signatures, material input changes, secret redaction, lifecycle and
+failure transactions, immutable results and artifacts, SQLite reopen/WAL/concurrency behavior,
+search and metric history, full-width child seeds, repeats and Cartesian sweeps, benchmark warmups
+and baselines, recursive differences, exact seeded replay, bounded summaries, all experiment APIs,
+and offline integration with pricing, Heston calibration, model comparison, portfolio scenario,
+VaR/ES, HMM, and QMC services. Opt-in checks isolate signature, persistence, metric insertion,
+retrieval, listing, comparison, replay, sweep, and benchmark-orchestration overhead.
 Resource-intensive checks belong under the `performance` marker and are excluded from ordinary
 pytest by project configuration. Market-data tests are fully offline: provider transport is mocked,
 static Massive-shaped JSON fixtures test normalization, fake normalized chains test analytics and
@@ -1971,6 +2057,10 @@ APIs, and an autouse socket guard rejects accidental network access.
 - Primary tree storage is O(N), while backward-induction runtime is O(N²)
 - Provider expirations are mapped to a documented 4:00 p.m. New York convention
 - No settlement, exercise, or instrument taxonomy beyond reported provider metadata is inferred
+- The experiment store is a local synchronous SQLite research service with no worker queue,
+  distributed scheduling, automatic pruning, import executor, or binary blob database
+- Reproducibility signatures identify normalized inputs and seeds; byte-for-byte results across
+  different platforms remain subject to the numerical libraries and tolerances recorded by replay
 
 U.S. listed equity and ETF options are generally American-style. Phase 5 preserves the provider's
 actual exercise style but continues to use European Black-Scholes implied volatility as a stated
@@ -1989,6 +2079,6 @@ infinity.
 
 ## Roadmap
 
-Phase 21 may add experiment tracking and artifact lineage under its own specification. Bates, other
+Phase 22 may add a dashboard over the Phase 21 read APIs under its own specification. Bates, other
 jump laws, switching Heston/Merton, QMC Heston/barrier/tail-risk extensions, live HFT/broker
 integration, portfolio optimization, and a frontend remain unimplemented.

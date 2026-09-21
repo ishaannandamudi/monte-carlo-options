@@ -19,6 +19,8 @@ from backend.app.api.binomial import analytics_router as binomial_analytics_rout
 from backend.app.api.binomial import pricing_router as binomial_pricing_router
 from backend.app.api.digital import analytics_router as digital_analytics_router
 from backend.app.api.digital import pricing_router as digital_pricing_router
+from backend.app.api.experiments import get_experiment_store
+from backend.app.api.experiments import router as experiments_router
 from backend.app.api.greeks import router as greeks_router
 from backend.app.api.heston import analytics_router as heston_analytics_router
 from backend.app.api.heston import pricing_router as heston_pricing_router
@@ -60,17 +62,18 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
+    get_experiment_store()
     logger.info("service_startup service=monte-carlo-options")
     yield
 
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.20.0",
+    version="0.21.0",
     description=(
         "European, American, path-dependent, basket, Heston, and Merton option research with "
         "analytical pricing, Monte Carlo, calibration, model comparison, portfolio risk, and "
-        "latent-regime and quasi-Monte Carlo analytics"
+        "latent-regime, quasi-Monte Carlo, and reproducible experiment analytics"
     ),
     lifespan=lifespan,
 )
@@ -107,6 +110,7 @@ app.include_router(risk_router)
 app.include_router(regime_router)
 app.include_router(qmc_pricing_router)
 app.include_router(qmc_analytics_router)
+app.include_router(experiments_router)
 
 
 @app.exception_handler(ProviderError)
