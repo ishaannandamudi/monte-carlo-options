@@ -103,6 +103,10 @@ class Settings(BaseModel):
     market_data_api_key: str | None = None
     market_data_base_url: str = "https://api.massive.com"
     market_data_timeout_seconds: float = Field(default=10.0, gt=0.0)
+    cors_allowed_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
 
     @classmethod
@@ -227,6 +231,10 @@ class Settings(BaseModel):
             values["market_data_base_url"] = value
         if value := os.getenv("MARKET_DATA_TIMEOUT_SECONDS"):
             values["market_data_timeout_seconds"] = value
+        if value := os.getenv("CORS_ALLOWED_ORIGINS"):
+            values["cors_allowed_origins"] = tuple(
+                origin.strip() for origin in value.split(",") if origin.strip()
+            )
         if value := os.getenv("LOG_LEVEL"):
             values["log_level"] = value.upper()
         return cls.model_validate(values)

@@ -43,6 +43,10 @@ method-comparison and convergence-rate research.
 Phase 21 adds a local research experiment layer with deterministic input signatures, environment
 and Git provenance, seed lineage, SQLite persistence, repeated trials, Cartesian sweeps, benchmark
 records, run comparison, reproducibility replay, metric history, and bounded artifact metadata.
+Phase 22 completes the core roadmap with a React research terminal over the validated APIs. It
+provides lazy-loaded pricing, volatility, model-comparison, Heston, Merton, portfolio, scenario,
+risk, regime, QMC, and experiment workflows; shared result visualizations; reproducible run tools;
+and production frontend validation without duplicating quantitative logic in the browser.
 
 The inputs are continuous floating-point model values. They are not accounting ledger values or
 currency-safe decimal amounts.
@@ -196,11 +200,13 @@ currency-safe decimal amounts.
 - Warmed repeated benchmarks with engine, tracking, and total runtime separated
 - Bounded recursive run/config/result comparison, metric history, and tolerance-based replay checks
 - Searchable and paginated experiment APIs with type, status, tag, date, signature, and metric sort
+- React/TypeScript research terminal with typed API connectivity, nine lazy workspaces, bounded
+  forms, charts, structured diagnostics, cancellation, exports, and experiment reproduction
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers
 and path-dependent payoffs beyond Asians and single barriers, non-CRR tree models, local volatility,
 non-Merton jump laws, stochastic-volatility-with-jumps, portfolio optimization, parallelism, a GPU backend,
-QMC Heston/barrier/tail-risk workflows, and a frontend.
+QMC Heston/barrier/tail-risk workflows, live trading, broker execution, and HFT functionality.
 
 ## Research experiments and reproducibility
 
@@ -1086,6 +1092,7 @@ backend/tests/     # deterministic, numerical, statistical, and HTTP tests
 benchmarks/        # quantitative benchmark and validation reports
 docs/              # architecture and numerical methodology
 experiments/       # reserved for explicit research experiments
+frontend/          # Phase 22 React research terminal, workflows, charts, API client, and tests
 ```
 
 ## Installation
@@ -1100,6 +1107,18 @@ python -m pip install -r requirements.txt
 
 The runtime dependencies are FastAPI, Pydantic, NumPy, SciPy, and Uvicorn. The requirements file
 also installs pytest, Ruff, mypy, and HTTPX for development and API testing.
+
+The Phase 22 frontend requires Node.js 22.12 or newer. From `frontend/`, install the pinned
+dependencies and start Vite:
+
+```bash
+pnpm install
+pnpm dev
+```
+
+`npm install` and the matching `npm run dev` script are also supported. Copy
+`frontend/.env.example` to `frontend/.env` only when the API base URL needs to differ from
+`http://localhost:8000`. See [frontend/README.md](frontend/README.md) for all frontend commands.
 
 ## Library example
 
@@ -1312,6 +1331,10 @@ Health check:
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+Service version metadata is available at `GET /version`. The default CORS policy allows Vite from
+`http://localhost:5173` and `http://127.0.0.1:5173`; deployments configure an explicit comma-
+separated `CORS_ALLOWED_ORIGINS` value.
 
 Phase 21 research routes are:
 
@@ -1869,6 +1892,15 @@ database and artifact retention are an operator responsibility.
 .venv/bin/mypy backend/app
 ```
 
+Frontend checks run from `frontend/`:
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm lint
+pnpm build
+```
+
 The normal suite uses fixed seeds, moderate sample sizes, analytical identities, deterministic edge
 cases, theoretical GBM moments, direct pair/control/CRN calculations, analytical Greek identities,
 and statistically scaled Monte Carlo tolerances such as `abs(estimate - benchmark) <= k * SE`.
@@ -2079,6 +2111,9 @@ infinity.
 
 ## Roadmap
 
-Phase 22 may add a dashboard over the Phase 21 read APIs under its own specification. Bates, other
-jump laws, switching Heston/Merton, QMC Heston/barrier/tail-risk extensions, live HFT/broker
-integration, portfolio optimization, and a frontend remain unimplemented.
+The 22-phase core roadmap is complete. Phase 22 exposes the Phase 1–21 research services through
+the production browser workflows described in
+[docs/phase22-frontend-production.md](docs/phase22-frontend-production.md). Bates, other jump laws,
+switching Heston/Merton, QMC Heston/barrier/tail-risk extensions, and portfolio optimization remain
+outside the completed core roadmap. Live execution and HFT belong in a separate future or parallel
+project with their own operational and safety architecture; they are not implemented here.

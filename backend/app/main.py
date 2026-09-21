@@ -5,8 +5,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.app import __version__
 from backend.app.api.analytics import router as analytics_router
 from backend.app.api.asian import analytics_router as asian_analytics_router
 from backend.app.api.asian import pricing_router as asian_pricing_router
@@ -69,13 +71,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Monte Carlo Options",
-    version="0.21.0",
+    version=__version__,
     description=(
         "European, American, path-dependent, basket, Heston, and Merton option research with "
         "analytical pricing, Monte Carlo, calibration, model comparison, portfolio risk, and "
         "latent-regime, quasi-Monte Carlo, and reproducible experiment analytics"
     ),
     lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(get_settings().cors_allowed_origins),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 app.include_router(pricing_router)
 app.include_router(analytics_router)
@@ -144,3 +153,10 @@ def health() -> dict[str, str]:
     """Return a dependency-free liveness response."""
 
     return {"status": "ok", "service": "monte-carlo-options"}
+
+
+@app.get("/version")
+def version() -> dict[str, str]:
+    """Return stable service identity and package version metadata."""
+
+    return {"service": "monte-carlo-options", "version": __version__}
