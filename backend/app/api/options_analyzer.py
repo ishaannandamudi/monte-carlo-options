@@ -31,8 +31,10 @@ def analyze_options(
     )
     result = analyze_american_options(request, provider=provider, settings=settings)
     logger.info(
-        "american_options_analysis_complete symbol=%s expiration=%s contracts=%d runtime_ms=%.3f",
+        "american_options_analysis_complete symbol=%s data_mode=%s expiration=%s "
+        "contracts=%d runtime_ms=%.3f",
         result.symbol,
+        result.data_mode.value,
         result.selected_expiration.isoformat(),
         result.summary.contracts_analyzed,
         result.timings.total_ms,

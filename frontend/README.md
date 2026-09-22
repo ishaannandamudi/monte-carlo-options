@@ -1,9 +1,10 @@
 # American Options Analyzer and Quantitative Research Frontend
 
 The default `/` route is a ticker-only American equity-options analyzer. Enter a symbol to fetch
-its backend-owned Massive quote, expirations, and bounded chain, then review market midpoint,
-American CRR fair value, BSM-equivalent IV, independent fair-value volatility, Greeks, liquidity,
-and quality diagnostics. The full Phase 22 terminal remains available under `/research`.
+its backend-owned Massive data, expirations, and bounded chain. Paid snapshot access shows
+bid/ask midpoint fields; Massive Basic automatically switches to previous-day close/OHLC fields.
+Both modes show American CRR fair value, clearly labeled BSM-equivalent IV, fair-value volatility,
+Greeks, liquidity, and quality diagnostics. The full Phase 22 terminal remains under `/research`.
 
 The backend remains authoritative for contracts, validation, pricing,
 calibration, portfolio valuation, risk, numerical methods, resource limits, and experiment
@@ -73,7 +74,9 @@ or other secrets in the browser configuration. FastAPI accepts a comma-separated
 
 - **Analyze (`/`)**: ticker-only chain retrieval and American option analysis through
   `POST /api/options/analyze`; expiration, calls/puts, sorting, contract details, warnings, and the
-  two-series volatility smile are available after one request. TanStack Query caches each complete
+  two-series volatility smile are available after one request. A prominent Snapshot/End-of-day
+  badge, as-of time, capability-specific table columns, and EOD OHLC details prevent daily closes
+  from being presented as live quotes. TanStack Query caches each complete
   symbol/expiration/assumption request for two minutes and exposes manual refresh.
 - **Research (`/research`)**: backend health/version, frontend readiness, capabilities, recent experiments, and
   core-roadmap status.

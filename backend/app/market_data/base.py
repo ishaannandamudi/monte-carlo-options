@@ -4,6 +4,7 @@ from datetime import date
 from typing import Protocol
 
 from backend.app.models.market_data import OptionChainSnapshot, UnderlyingQuote
+from backend.app.models.option import OptionType
 
 
 class MarketDataProvider(Protocol):
@@ -16,8 +17,15 @@ class MarketDataProvider(Protocol):
         self,
         symbol: str,
         expiration: date | None = None,
+        option_type: OptionType | None = None,
+        max_contracts: int | None = None,
     ) -> OptionChainSnapshot:
         """Return a normalized option-chain snapshot."""
 
-    def list_option_expirations(self, symbol: str) -> list[date]:
+    def list_option_expirations(
+        self,
+        symbol: str,
+        target_date: date | None = None,
+        strike_window_pct: float | None = None,
+    ) -> list[date]:
         """Return sorted unique available expiration dates."""

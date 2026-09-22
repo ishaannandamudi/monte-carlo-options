@@ -50,6 +50,7 @@ from backend.app.api.volatility_surface import router as volatility_surface_rout
 from backend.app.core.config import get_settings
 from backend.app.core.exceptions import (
     ProviderAuthenticationError,
+    ProviderEntitlementError,
     ProviderError,
     ProviderRateLimitError,
     ProviderSymbolNotFoundError,
@@ -130,6 +131,8 @@ async def provider_error_handler(_: Request, exc: ProviderError) -> JSONResponse
 
     if isinstance(exc, ProviderAuthenticationError):
         status_code = 401
+    elif isinstance(exc, ProviderEntitlementError):
+        status_code = 403
     elif isinstance(exc, ProviderRateLimitError):
         status_code = 429
     elif isinstance(exc, ProviderSymbolNotFoundError):

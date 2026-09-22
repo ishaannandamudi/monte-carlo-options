@@ -2,8 +2,8 @@
   "status": "OK",
   "request_id": "fixture-contracts",
   "results": [
-    {"expiration_date": "2026-12-18", "ticker": "O:XYZ261218C00100000"},
-    {"expiration_date": "2026-12-18", "ticker": "O:XYZ261218P00100000"},
-    {"expiration_date": "2027-01-15", "ticker": "O:XYZ270115C00100000"}
+    {"contract_type": "call", "exercise_style": "american", "expiration_date": "2026-12-18", "shares_per_contract": 100, "strike_price": 100, "ticker": "O:XYZ261218C00100000"},
+    {"contract_type": "put", "exercise_style": "american", "expiration_date": "2026-12-18", "shares_per_contract": 100, "strike_price": 100, "ticker": "O:XYZ261218P00100000"},
+    {"contract_type": "call", "exercise_style": "american", "expiration_date": "2027-01-15", "shares_per_contract": 100, "strike_price": 100, "ticker": "O:XYZ270115C00100000"}
   ]
 }

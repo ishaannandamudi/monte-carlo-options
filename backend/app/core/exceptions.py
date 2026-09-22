@@ -117,6 +117,10 @@ class ProviderAuthenticationError(ProviderError):
     """Raised for missing or rejected provider credentials."""
 
 
+class ProviderEntitlementError(ProviderError):
+    """Raised when valid credentials do not include access to an endpoint."""
+
+
 class ProviderRateLimitError(ProviderError):
     """Raised when the provider rejects a request due to rate limits."""
 

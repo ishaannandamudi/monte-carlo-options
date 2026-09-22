@@ -9,10 +9,11 @@ fair-value volatility estimates, American CRR values, Greeks, liquidity fields, 
 The browser never receives the Massive credential and performs no pricing mathematics.
 
 `POST /api/options/analyze` accepts an optional expiration and bounded advanced overrides. With no
-overrides, all automatic assumptions are returned in `assumptions`. The normal screen displays
-approximately ten calls and ten puts around the money. The user can change expiration, filter the
-returned rows by side, sort the table, refresh the cached analysis, and inspect a contract detail
-panel. Existing Phase 22 research pages remain under `/research` and their original deep links.
+overrides, all automatic assumptions are returned in `assumptions`. Snapshot mode normally displays
+approximately ten calls and ten puts around the money; Basic mode displays its bounded near-ATM
+sample. The user can change expiration, filter the returned rows by side, sort the table, refresh
+the cached analysis, and inspect a contract detail panel. Existing Phase 22 research pages remain
+under `/research` and their original deep links.
 
 ## 2. Market-data source and freshness
 
@@ -20,10 +21,51 @@ The service reuses the Phase 5 `MarketDataProvider` and normalized `UnderlyingQu
 `OptionInstrument`, `OptionQuote`, and `OptionChainSnapshot` models. Production configuration uses
 Massive; tests use the deterministic in-memory provider and never require network access.
 
-Massive access can be real-time, delayed, or end-of-day according to the account and feed. The UI
-therefore reports source, timestamp, calculated age, and explicit stale warnings. It makes no
-real-time claim. Provider authentication, symbol, rate-limit, timeout, malformed-response, and
-network errors retain the established safe HTTP translations.
+Massive access can be snapshot or end-of-day according to the account and feed. The UI reports the
+detected data mode, price source, as-of time, calculated age, and explicit warnings. It makes no
+real-time claim. Provider authentication, entitlement, symbol, rate-limit, timeout,
+malformed-response, and network errors retain distinct safe HTTP translations.
+
+### Massive plan-aware data modes
+
+The provider always tries the existing high-quality snapshot path first. A successful snapshot
+uses the stock snapshot and option-chain snapshot, preserving bid, ask, midpoint, sizes, latest
+trade, open interest, and provider analytics. A `401` means the credential is absent or rejected
+and becomes `ProviderAuthenticationError`; it never triggers fallback. A `403` means the credential
+authenticated but the plan excludes that endpoint and becomes `ProviderEntitlementError`. Only
+this typed entitlement failure activates fallback. Network, timeout, malformed-data, rate-limit,
+and server failures remain errors.
+
+The Basic path uses three endpoint classes verified with the configured account:
+
+- `/v2/aggs/ticker/{symbol}/prev` for the adjusted underlying previous-day OHLC bar;
+- `/v3/reference/options/contracts` for active contract discovery near the requested expiration
+  and underlying close; and
+- `/v2/aggs/ticker/{optionsTicker}/prev` for each bounded option previous-day OHLC bar.
+
+The underlying reference is the daily close and is labeled `END_OF_DAY_CLOSE`; open, high, low,
+volume, VWAP, date, and timestamp are retained when supplied. Bid, ask, midpoint, quote size, live
+trade, open interest, and provider IV/Greeks remain null when the EOD endpoints do not supply them.
+Option `market_reference_price` and `comparison_price` are the EOD close and are never called a
+midpoint. The result returns `data_mode`, `price_as_of`, `underlying_price_source`,
+`option_price_source`, and provider capability metadata.
+
+The valuation clock is the underlying bar's 4:00 p.m. America/New_York close converted to UTC.
+Option bars carry their own trading date. Matching dates are evaluated together; a mismatch is
+visible as `DATA_DATE_MISMATCH` and a result warning. EOD IV is inverted from the close and labeled
+`EOD_BSM_EQUIVALENT_IV`. The same leave-one-out smile hierarchy remains in force when enough EOD
+neighbors exist; a sparse set reaches the documented ATM or own-IV fallback. CRR remains the
+authoritative American pricer and uses the EOD underlying close, EOD valuation time, remaining
+maturity, configured rates/dividends, and independent fair-value volatility where available.
+
+Massive Basic permits five calls per minute on the tested account. A cold fallback request spends
+at most one denied snapshot probe, one underlying bar request, one bounded reference request, and
+two option-bar requests. `BASIC_ANALYSIS_CONTRACT_LIMIT=2` therefore returns the closest ATM call
+and put when both sides are requested, or two contracts of the requested side. The provider caches
+the observed snapshot capability, underlying bar, reference contracts, and option bars for
+`MARKET_DATA_CACHE_TTL_SECONDS=60`; authentication errors are never cached. Reference discovery is
+limited to one Basic page in a configurable window around the target expiration. The response and
+UI state this limited coverage explicitly rather than implying a complete live chain.
 
 ## 3. Expiration selection
 
@@ -42,8 +84,9 @@ pool for smile construction, then chooses the displayed contracts with equal cal
 both sides are requested. Any unused quota can be filled by the other side. Output ordering is
 side, strike, then provider symbol.
 
-The default is 20 displayed contracts with a 15% strike window. The provider snapshot and display
-limits are checked before IV and tree loops. A larger bounded chain can be requested in Advanced.
+The snapshot default is 20 displayed contracts with a 15% strike window. The provider snapshot and
+display limits are checked before IV and tree loops. Basic mode applies its two-contract provider
+cap before local analytics, regardless of the larger requested display limit.
 
 ## 5. Market price and implied volatility
 
@@ -53,7 +96,8 @@ gap remains a comparison with the midpoint, so it is unavailable for a last-only
 
 Phase 4's bounded solver recovers implied volatility from the selected market price after European
 no-arbitrage checks. Because that inversion uses BSM while listed US equity options are treated as
-American, the value is always labeled **BSM-equivalent**. Provider IV is retained only as comparison
+American, snapshot values are labeled **BSM-equivalent** and EOD values are labeled
+**EOD BSM-equivalent**. Provider IV is retained only as comparison
 metadata. Failed inversion becomes a typed status and quality flag; it never injects NaN or
 infinity and does not fail the whole chain.
 
@@ -100,6 +144,9 @@ A positive number means model value exceeds midpoint; a negative number means mo
 midpoint. These are descriptive model differences. The application does not label contracts as
 under/overvalued and provides no buy or sell recommendation.
 
+In EOD mode the same formulas use `EOD close` in place of `market midpoint`. The response's
+`comparison_price_source` removes any ambiguity between the two cases.
+
 ## 9. Liquidity and data quality
 
 Every contract retains bid, ask, sizes, last, absolute and relative spread, volume, and open
@@ -110,6 +157,9 @@ interest. Quality flags reuse Phase 5 issues and add:
 - `NO_RECORDED_VOLUME`: volume is absent or zero.
 - `NO_OPEN_INTEREST`: open interest is absent or zero.
 - `ILLIQUID`: spread is wide, or both volume and open interest are absent/zero.
+- `END_OF_DAY_DATA`, `SNAPSHOT_UNAVAILABLE_FOR_PLAN`, `NO_LIVE_BID_ASK`, and
+  `LOW_PROVIDER_RATE_LIMIT`: expected capability constraints in Basic mode.
+- `DATA_DATE_MISMATCH`: the option and underlying daily bars do not share a trading date.
 
 The descriptive analysis-quality rules are exact:
 
@@ -136,7 +186,8 @@ last-price policy, tree steps, and valuation time.
 `MAX_BINOMIAL_STEPS` bound provider normalization, response size, and numerical work. Pydantic
 validates all positive counts, ages, and windows before provider/tree operations. TanStack Query
 caches a result for two minutes by the complete request object: symbol, expiration, and every
-assumption. Refresh explicitly refetches the same key.
+assumption. Refresh explicitly refetches the same key. The backend's short provider cache remains
+authoritative for Basic rate-limit compliance even when the browser explicitly refreshes.
 
 ## 12. API and frontend behavior
 
@@ -157,6 +208,8 @@ backend operation without claiming measured per-stage progress.
 - CRR convergence depends on tree steps. Finite-difference Vega/Rho require four additional tree
   values per contract and dominate CPU cost.
 - Quote quality cannot make delayed, sparse, or illiquid data current or executable.
+- Basic mode is a two-contract near-ATM research sample, not a complete option chain. A contract
+  without a previous-day qualifying trade can have no aggregate bar and may be omitted.
 - Values are research diagnostics, not trade recommendations, broker quotes, or execution signals.
 
 ## 14. Advanced research terminal
@@ -165,4 +218,3 @@ The complete Phase 1–22 terminal remains available at `/research`, with Pricin
 Models, Portfolio, Risk, Regimes, QMC, and Experiments below it. Existing top-level deep links such
 as `/pricing` remain valid. The analyzer composes the established provider, IV, smile, CRR, and
 Greek services; it does not replace or weaken their standalone APIs.
-

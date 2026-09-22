@@ -16,6 +16,28 @@ class MarketDataSource(StrEnum):
     FAKE = "FAKE"
 
 
+class MarketDataMode(StrEnum):
+    """Capability mode used to obtain one internally consistent dataset."""
+
+    SNAPSHOT = "SNAPSHOT"
+    END_OF_DAY = "END_OF_DAY"
+
+
+class UnderlyingPriceSource(StrEnum):
+    """Source of the underlying reference price used by analytics."""
+
+    SNAPSHOT_QUOTE = "SNAPSHOT_QUOTE"
+    END_OF_DAY_CLOSE = "END_OF_DAY_CLOSE"
+
+
+class ComparisonPriceSource(StrEnum):
+    """Source of the option observation compared with model fair value."""
+
+    BID_ASK_MIDPOINT = "BID_ASK_MIDPOINT"
+    LAST_TRADE = "LAST_TRADE"
+    END_OF_DAY_CLOSE = "END_OF_DAY_CLOSE"
+
+
 class MarketExerciseStyle(StrEnum):
     """Exercise style reported for a real-market instrument."""
 
@@ -46,6 +68,7 @@ class MarketPriceSource(StrEnum):
 
     MIDPOINT = "MIDPOINT"
     LAST = "LAST"
+    END_OF_DAY_CLOSE = "END_OF_DAY_CLOSE"
 
 
 class QuoteTimestampSource(StrEnum):
@@ -54,6 +77,7 @@ class QuoteTimestampSource(StrEnum):
     QUOTE = "QUOTE"
     TRADE = "TRADE"
     SNAPSHOT = "SNAPSHOT"
+    END_OF_DAY = "END_OF_DAY"
 
 
 class ParityStatus(StrEnum):
@@ -88,6 +112,14 @@ class MarketDataModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
+class ProviderCapabilities(MarketDataModel):
+    """Provider features observed for the current request/cached capability window."""
+
+    snapshot_available: bool
+    end_of_day_available: bool
+    basic_contract_limit: PositiveInt | None = None
+
+
 class UnderlyingQuote(MarketDataModel):
     """Normalized underlying NBBO/trade snapshot."""
 
@@ -101,6 +133,15 @@ class UnderlyingQuote(MarketDataModel):
     source: MarketDataSource
     previous_close: NonNegativeFloat | None = None
     volume: NonNegativeFloat | None = None
+    market_data_mode: MarketDataMode = MarketDataMode.SNAPSHOT
+    price_source: UnderlyingPriceSource = UnderlyingPriceSource.SNAPSHOT_QUOTE
+    reference_price: PositiveFloat | None = None
+    open: NonNegativeFloat | None = None
+    high: NonNegativeFloat | None = None
+    low: NonNegativeFloat | None = None
+    close: NonNegativeFloat | None = None
+    vwap: NonNegativeFloat | None = None
+    data_date: date | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -118,6 +159,8 @@ class UnderlyingQuote(MarketDataModel):
         if self.bid is not None and self.ask is not None and self.ask >= self.bid:
             midpoint = 0.5 * (self.bid + self.ask)
         object.__setattr__(self, "midpoint", midpoint)
+        if self.reference_price is None:
+            object.__setattr__(self, "reference_price", midpoint or self.last)
         return self
 
 
@@ -169,6 +212,15 @@ class OptionQuote(MarketDataModel):
     source: MarketDataSource
     provider_implied_volatility: NonNegativeFloat | None = None
     provider_greeks: dict[str, float] | None = None
+    market_data_mode: MarketDataMode = MarketDataMode.SNAPSHOT
+    market_reference_price: NonNegativeFloat | None = None
+    market_price_source: MarketPriceSource | None = None
+    eod_open: NonNegativeFloat | None = None
+    eod_high: NonNegativeFloat | None = None
+    eod_low: NonNegativeFloat | None = None
+    eod_close: NonNegativeFloat | None = None
+    eod_vwap: NonNegativeFloat | None = None
+    data_date: date | None = None
 
     @field_validator("timestamp", "last_trade_timestamp")
     @classmethod
@@ -198,6 +250,13 @@ class OptionChainSnapshot(MarketDataModel):
     source: MarketDataSource
     quotes: list[OptionQuote]
     available_expirations: list[date] = Field(default_factory=list)
+    market_data_mode: MarketDataMode = MarketDataMode.SNAPSHOT
+    capabilities: ProviderCapabilities = Field(
+        default_factory=lambda: ProviderCapabilities(
+            snapshot_available=True,
+            end_of_day_available=False,
+        )
+    )
 
     @field_validator("underlying_symbol")
     @classmethod

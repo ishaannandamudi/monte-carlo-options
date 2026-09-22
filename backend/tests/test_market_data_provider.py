@@ -10,6 +10,7 @@ from _pytest.monkeypatch import MonkeyPatch
 import backend.app.market_data.massive as massive_module
 from backend.app.core.exceptions import (
     ProviderAuthenticationError,
+    ProviderEntitlementError,
     ProviderMalformedResponseError,
     ProviderNetworkError,
     ProviderRateLimitError,
@@ -18,7 +19,13 @@ from backend.app.core.exceptions import (
 )
 from backend.app.market_data.fake import FakeMarketDataProvider
 from backend.app.market_data.massive import MassiveMarketDataProvider
-from backend.app.models.market_data import MarketExerciseStyle, OptionChainSnapshot
+from backend.app.models.market_data import (
+    MarketDataMode,
+    MarketExerciseStyle,
+    MarketPriceSource,
+    OptionChainSnapshot,
+    UnderlyingPriceSource,
+)
 from backend.app.models.option import OptionType
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -67,6 +74,8 @@ def test_massive_chain_normalizes_identity_quotes_and_metadata(
 ) -> None:
     snapshot = fixture_provider(monkeypatch).get_option_chain("xyz")
     assert snapshot.underlying_symbol == "XYZ"
+    assert snapshot.market_data_mode is MarketDataMode.SNAPSHOT
+    assert snapshot.capabilities.snapshot_available is True
     assert len(snapshot.quotes) == 4
     first = snapshot.quotes[0]
     assert first.instrument.option_type is OptionType.CALL
@@ -120,6 +129,7 @@ def test_massive_rejects_malformed_required_fields(monkeypatch: MonkeyPatch) -> 
     ("status_code", "error_type"),
     [
         (401, ProviderAuthenticationError),
+        (403, ProviderEntitlementError),
         (404, ProviderSymbolNotFoundError),
         (429, ProviderRateLimitError),
         (503, ProviderServerError),
@@ -154,6 +164,94 @@ def test_massive_requires_credentials_and_translates_network_failure(
     monkeypatch.setattr(massive_module, "urlopen", fail)
     with pytest.raises(ProviderNetworkError):
         provider.get_underlying_quote("XYZ")
+
+
+def test_massive_basic_fallback_normalizes_eod_data_caps_calls_and_caches(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    provider = MassiveMarketDataProvider(
+        api_key="fixture-key",
+        basic_contract_limit=2,
+        cache_ttl_seconds=60.0,
+    )
+    calls: list[str] = []
+    contracts = load_fixture("massive_contracts.json")
+    aggregate = {
+        "results": [
+            {
+                "o": 99.0,
+                "h": 103.0,
+                "l": 98.5,
+                "c": 101.0,
+                "v": 1234,
+                "vw": 100.5,
+                "t": 1797550800000,
+            }
+        ]
+    }
+
+    def request(path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        del params
+        calls.append(path)
+        if "snapshot/locale" in path:
+            raise ProviderEntitlementError(
+                "Massive authenticated successfully, but the current plan does not include "
+                "this endpoint."
+            )
+        if "reference/options/contracts" in path:
+            return contracts
+        if "/prev" in path:
+            return aggregate
+        raise AssertionError(f"unexpected fixture path {path}")
+
+    monkeypatch.setattr(provider, "_request_json", request)
+    underlying = provider.get_underlying_quote("XYZ")
+    expirations = provider.list_option_expirations(
+        "XYZ", target_date=date(2026, 12, 18), strike_window_pct=0.15
+    )
+    chain = provider.get_option_chain("XYZ", date(2026, 12, 18), max_contracts=20)
+
+    assert underlying.market_data_mode is MarketDataMode.END_OF_DAY
+    assert underlying.price_source is UnderlyingPriceSource.END_OF_DAY_CLOSE
+    assert underlying.reference_price == 101.0
+    assert underlying.bid is underlying.ask is underlying.last is None
+    assert underlying.open == 99.0
+    assert underlying.high == 103.0
+    assert underlying.low == 98.5
+    assert underlying.close == 101.0
+    assert underlying.vwap == 100.5
+    assert expirations == [date(2026, 12, 18), date(2027, 1, 15)]
+    assert chain.market_data_mode is MarketDataMode.END_OF_DAY
+    assert chain.capabilities.snapshot_available is False
+    assert chain.capabilities.basic_contract_limit == 2
+    assert len(chain.quotes) == 2
+    assert all(quote.bid is None and quote.ask is None for quote in chain.quotes)
+    assert all(quote.market_reference_price == 101.0 for quote in chain.quotes)
+    assert all(
+        quote.market_price_source is MarketPriceSource.END_OF_DAY_CLOSE for quote in chain.quotes
+    )
+    assert len(calls) == 5
+
+    provider.get_underlying_quote("XYZ")
+    provider.list_option_expirations("XYZ", target_date=date(2026, 12, 18), strike_window_pct=0.15)
+    provider.get_option_chain("XYZ", date(2026, 12, 18), max_contracts=20)
+    assert len(calls) == 5
+
+
+def test_massive_authentication_failure_never_falls_back(monkeypatch: MonkeyPatch) -> None:
+    provider = MassiveMarketDataProvider(api_key="invalid")
+    calls = 0
+
+    def request(path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        nonlocal calls
+        del path, params
+        calls += 1
+        raise ProviderAuthenticationError("Massive rejected provider credentials.")
+
+    monkeypatch.setattr(provider, "_request_json", request)
+    with pytest.raises(ProviderAuthenticationError):
+        provider.get_underlying_quote("XYZ")
+    assert calls == 1
 
 
 def test_fake_provider_supports_quote_chain_filter_and_expirations(

@@ -2,16 +2,18 @@
 
 ## Primary workflow: American Options Analyzer
 
-The default application is now a simple real-market research workflow: enter a ticker, fetch its
-Massive underlying quote and option chain, and compare market midpoints with American CRR fair
-values. The result includes BSM-equivalent market IV, an independent leave-one-out smile
+The default application is now a simple real-market research workflow: enter a ticker and let the
+backend detect the available Massive data mode. Entitled accounts retain the full snapshot path;
+Massive Basic automatically uses aligned previous-day stock and option bars plus reference-contract
+discovery. The result compares a snapshot midpoint or clearly labeled EOD close with American CRR
+fair values. It includes BSM-equivalent market IV, an independent leave-one-out smile
 volatility, Delta/Gamma/Theta/Vega/Rho, spread, volume, open interest, freshness, and exact quality
 warnings. Automatic expiration, rate, dividend, tree, and filtering assumptions remain visible.
 
 Start the backend and frontend as described below, open `http://127.0.0.1:5173`, enter a symbol such
 as `AAPL`, and choose **Analyze**. Massive credentials stay in the backend environment. Feed data
-may be live, delayed, or end-of-day according to the configured account, so the application always
-shows source, quote timestamp, and data age. It offers model comparison without trading
+may be snapshot or end-of-day according to the configured account, so the application always
+shows a data-mode badge, price source, as-of timestamp, and quality warnings. It offers model comparison without trading
 recommendations. See [American Options Analyzer](docs/american-options-analyzer.md).
 
 The complete Phase 1–22 quantitative terminal remains intact under **Research** at `/research`.
@@ -593,6 +595,9 @@ MARKET_DATA_PROVIDER=MASSIVE
 MARKET_DATA_API_KEY=
 MARKET_DATA_BASE_URL=https://api.massive.com
 MARKET_DATA_TIMEOUT_SECONDS=10
+BASIC_ANALYSIS_CONTRACT_LIMIT=2
+MARKET_DATA_CACHE_TTL_SECONDS=60
+MARKET_DATA_REFERENCE_WINDOW_DAYS=14
 ```
 
 An API key is required only when a live market-data endpoint is called. It is never logged or
@@ -617,6 +622,14 @@ T = max(expiration_utc - valuation_utc, 0) / (365 * 24 * 3600)
 ```
 
 Expired contracts remain visible and receive an `EXPIRED` issue.
+
+The analyzer distinguishes invalid credentials (`401`) from a valid key without endpoint access
+(`403`). Only `403` activates the Massive Basic fallback. Basic uses previous-day adjusted
+aggregates for the underlying and two near-ATM option contracts, plus one bounded option-reference
+request. Daily closes are modeled as EOD reference prices and never as bid/ask or midpoint data.
+The provider caches capability and EOD observations briefly to respect the tested five-call/minute
+limit. Full endpoint, timestamp, IV, and comparison semantics are documented in
+[docs/american-options-analyzer.md](docs/american-options-analyzer.md).
 
 ### Quote quality and price selection
 

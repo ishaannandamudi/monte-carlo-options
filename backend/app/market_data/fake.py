@@ -4,6 +4,7 @@ from datetime import date
 
 from backend.app.core.exceptions import ProviderSymbolNotFoundError
 from backend.app.models.market_data import OptionChainSnapshot, UnderlyingQuote
+from backend.app.models.option import OptionType
 
 
 class FakeMarketDataProvider:
@@ -29,7 +30,10 @@ class FakeMarketDataProvider:
         self,
         symbol: str,
         expiration: date | None = None,
+        option_type: OptionType | None = None,
+        max_contracts: int | None = None,
     ) -> OptionChainSnapshot:
+        del option_type, max_contracts
         normalized = symbol.strip().upper()
         try:
             snapshot = self._option_chains[normalized]
@@ -44,7 +48,13 @@ class FakeMarketDataProvider:
         ]
         return snapshot.model_copy(update={"quotes": quotes})
 
-    def list_option_expirations(self, symbol: str) -> list[date]:
+    def list_option_expirations(
+        self,
+        symbol: str,
+        target_date: date | None = None,
+        strike_window_pct: float | None = None,
+    ) -> list[date]:
+        del target_date, strike_window_pct
         snapshot = self.get_option_chain(symbol)
         if snapshot.available_expirations:
             return sorted(set(snapshot.available_expirations))

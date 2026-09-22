@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.exceptions import (
     ProviderAuthenticationError,
+    ProviderEntitlementError,
     ProviderRateLimitError,
     ProviderSymbolNotFoundError,
 )
@@ -192,6 +193,7 @@ class FailingProvider:
     ("error", "status_code"),
     [
         (ProviderAuthenticationError("credentials rejected"), 401),
+        (ProviderEntitlementError("endpoint unavailable for plan"), 403),
         (ProviderSymbolNotFoundError("symbol unavailable"), 404),
         (ProviderRateLimitError("provider throttled request"), 429),
     ],

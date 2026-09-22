@@ -80,7 +80,10 @@ def quote_quality_issues(
         issues.append(QuoteIssue.MISSING_BID)
     if quote.ask is None:
         issues.append(QuoteIssue.MISSING_ASK)
-    if any(value is not None and value < 0.0 for value in (quote.bid, quote.ask, quote.last)):
+    if any(
+        value is not None and value < 0.0
+        for value in (quote.bid, quote.ask, quote.last, quote.market_reference_price)
+    ):
         issues.append(QuoteIssue.NEGATIVE_PRICE)
     if quote.bid is not None and quote.ask is not None and quote.ask < quote.bid:
         issues.append(QuoteIssue.CROSSED_MARKET)
@@ -116,6 +119,11 @@ def select_market_price(
     }
     if any(issue in blockers for issue in issues):
         return None, None
+    if (
+        quote.market_price_source is MarketPriceSource.END_OF_DAY_CLOSE
+        and quote.market_reference_price is not None
+    ):
+        return quote.market_reference_price, MarketPriceSource.END_OF_DAY_CLOSE
     if quote.midpoint is not None:
         return quote.midpoint, MarketPriceSource.MIDPOINT
     if config.allow_last_price and quote.last is not None and quote.last >= 0.0:
@@ -134,6 +142,8 @@ def bid_ask_spread(quote: OptionQuote) -> tuple[float | None, float | None]:
 
 
 def _underlying_price(quote: UnderlyingQuote) -> float:
+    if quote.reference_price is not None:
+        return quote.reference_price
     if quote.midpoint is not None:
         return quote.midpoint
     if quote.last is not None:

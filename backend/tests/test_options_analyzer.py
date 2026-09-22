@@ -15,6 +15,7 @@ from backend.app.core.config import Settings, get_settings
 from backend.app.core.exceptions import (
     MarketDataValidationError,
     ProviderAuthenticationError,
+    ProviderEntitlementError,
     ProviderRateLimitError,
 )
 from backend.app.main import app
@@ -22,11 +23,17 @@ from backend.app.market_data.fake import FakeMarketDataProvider
 from backend.app.market_data.provider import get_market_data_provider
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.market_data import (
+    ComparisonPriceSource,
+    MarketDataMode,
     MarketDataSource,
     MarketExerciseStyle,
+    MarketPriceSource,
     OptionChainSnapshot,
     OptionInstrument,
     OptionQuote,
+    ProviderCapabilities,
+    QuoteTimestampSource,
+    UnderlyingPriceSource,
     UnderlyingQuote,
 )
 from backend.app.models.option import OptionContract, OptionType
@@ -125,6 +132,60 @@ def _provider(snapshot: OptionChainSnapshot) -> FakeMarketDataProvider:
     return FakeMarketDataProvider(
         underlying_quotes={"XYZ": snapshot.underlying_quote},
         option_chains={"XYZ": snapshot},
+    )
+
+
+def _eod_snapshot() -> OptionChainSnapshot:
+    snapshot = _snapshot()
+    data_date = snapshot.retrieved_at.date()
+    underlying = UnderlyingQuote(
+        symbol="XYZ",
+        timestamp=snapshot.retrieved_at,
+        timestamp_source=QuoteTimestampSource.END_OF_DAY,
+        source=MarketDataSource.FAKE,
+        volume=1_000_000,
+        market_data_mode=MarketDataMode.END_OF_DAY,
+        price_source=UnderlyingPriceSource.END_OF_DAY_CLOSE,
+        reference_price=100.0,
+        open=99.0,
+        high=101.0,
+        low=98.0,
+        close=100.0,
+        vwap=99.8,
+        data_date=data_date,
+    )
+    quotes = [
+        OptionQuote(
+            instrument=quote.instrument,
+            timestamp=snapshot.retrieved_at,
+            timestamp_source=QuoteTimestampSource.END_OF_DAY,
+            source=MarketDataSource.FAKE,
+            volume=quote.volume,
+            market_data_mode=MarketDataMode.END_OF_DAY,
+            market_reference_price=quote.midpoint,
+            market_price_source=MarketPriceSource.END_OF_DAY_CLOSE,
+            eod_open=(quote.midpoint or 0.0) * 0.98,
+            eod_high=(quote.midpoint or 0.0) * 1.02,
+            eod_low=(quote.midpoint or 0.0) * 0.97,
+            eod_close=quote.midpoint,
+            eod_vwap=(quote.midpoint or 0.0) * 0.995,
+            data_date=data_date,
+        )
+        for quote in snapshot.quotes
+    ]
+    return OptionChainSnapshot(
+        underlying_symbol="XYZ",
+        underlying_quote=underlying,
+        retrieved_at=snapshot.retrieved_at,
+        source=MarketDataSource.FAKE,
+        quotes=quotes,
+        available_expirations=snapshot.available_expirations,
+        market_data_mode=MarketDataMode.END_OF_DAY,
+        capabilities=ProviderCapabilities(
+            snapshot_available=False,
+            end_of_day_available=True,
+            basic_contract_limit=2,
+        ),
     )
 
 
@@ -294,6 +355,68 @@ def test_last_price_fallback_is_explicit() -> None:
     assert contract.fair_value_gap is None
 
 
+def test_eod_analysis_uses_close_for_iv_crr_gap_metadata_and_quality_flags() -> None:
+    snapshot = _eod_snapshot()
+    result = analyze_american_options(
+        OptionsAnalysisRequest(symbol="XYZ", max_contracts=10),
+        provider=_provider(snapshot),
+        settings=_settings(),
+    )
+    contract = result.contracts[0]
+
+    assert result.data_mode is MarketDataMode.END_OF_DAY
+    assert result.price_as_of == snapshot.retrieved_at
+    assert result.underlying_price_source is UnderlyingPriceSource.END_OF_DAY_CLOSE
+    assert result.option_price_source is ComparisonPriceSource.END_OF_DAY_CLOSE
+    assert result.provider_capabilities.snapshot_available is False
+    assert result.assumptions.implied_volatility_method == "EOD_BSM_EQUIVALENT_IV"
+    assert result.underlying.bid is result.underlying.ask is result.underlying.last is None
+    assert contract.bid is contract.ask is contract.market_midpoint is None
+    assert contract.market_reference_price == contract.eod_close
+    assert contract.comparison_price == contract.eod_close
+    assert contract.comparison_price_source is ComparisonPriceSource.END_OF_DAY_CLOSE
+    assert contract.implied_volatility_method == "EOD_BSM_EQUIVALENT_IV"
+    assert contract.implied_volatility is not None
+    assert contract.fair_value is not None
+    assert contract.fair_value_gap == pytest.approx(
+        contract.fair_value - contract.comparison_price  # type: ignore[operator]
+    )
+    assert contract.delta is not None
+    assert {
+        "END_OF_DAY_DATA",
+        "SNAPSHOT_UNAVAILABLE_FOR_PLAN",
+        "NO_LIVE_BID_ASK",
+        "LOW_PROVIDER_RATE_LIMIT",
+    }.issubset(contract.quality_flags)
+    assert any("end-of-day" in warning.lower() for warning in result.warnings)
+
+
+def test_eod_date_mismatch_is_visible_and_excluded_from_neighbor_quality() -> None:
+    snapshot = _eod_snapshot()
+    mismatched = snapshot.quotes[0].model_copy(
+        update={
+            "timestamp": snapshot.quotes[0].timestamp - timedelta(days=1),
+            "data_date": snapshot.quotes[0].data_date - timedelta(days=1),  # type: ignore[operator]
+        }
+    )
+    result = analyze_american_options(
+        OptionsAnalysisRequest(symbol="XYZ", max_contracts=10),
+        provider=_provider(
+            snapshot.model_copy(update={"quotes": [mismatched, *snapshot.quotes[1:]]})
+        ),
+        settings=_settings(),
+    )
+    contract = next(
+        item
+        for item in result.contracts
+        if item.provider_symbol == mismatched.instrument.provider_symbol
+    )
+    assert "DATA_DATE_MISMATCH" in contract.quality_flags
+    assert "STALE" in contract.quality_flags
+    assert contract.implied_volatility is None
+    assert any("not aligned" in warning.lower() for warning in result.warnings)
+
+
 def test_american_workflow_has_meaningful_early_exercise_premium() -> None:
     snapshot = _snapshot(days=180, dividend_yield=0.20)
     result = analyze_american_options(
@@ -365,6 +488,7 @@ class _FailingProvider:
     ("error", "status"),
     [
         (ProviderAuthenticationError("credentials rejected"), 401),
+        (ProviderEntitlementError("endpoint unavailable for plan"), 403),
         (ProviderRateLimitError("rate limited"), 429),
     ],
 )

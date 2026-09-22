@@ -3,7 +3,7 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from time import perf_counter
 
 from backend.app.analytics.market_data import enrich_option_chain
@@ -16,7 +16,10 @@ from backend.app.models.binomial import (
 )
 from backend.app.models.market import MarketEnvironment
 from backend.app.models.market_data import (
+    ComparisonPriceSource,
+    MarketDataMode,
     MarketExerciseStyle,
+    MarketPriceSource,
     OptionChainSnapshot,
     OptionQuote,
     QuoteIssue,
@@ -92,7 +95,9 @@ def select_default_expiration(
 
 
 def _underlying_price(quote: UnderlyingQuote) -> float:
-    price = quote.midpoint if quote.midpoint is not None else quote.last
+    price = quote.reference_price
+    if price is None:
+        price = quote.midpoint if quote.midpoint is not None else quote.last
     if price is None or not math.isfinite(price) or price <= 0.0:
         raise MarketDataValidationError(
             f"underlying {quote.symbol} has neither a valid midpoint nor last price"
@@ -106,7 +111,7 @@ def _raw_quote_rank(
     valuation_time: datetime,
 ) -> tuple[object, ...]:
     age = (valuation_time - quote.timestamp).total_seconds()
-    midpoint_missing = quote.midpoint is None
+    midpoint_missing = quote.midpoint is None and quote.market_reference_price is None
     relative_spread = (
         math.inf
         if quote.midpoint is None or quote.midpoint <= 0.0 or quote.bid is None or quote.ask is None
@@ -248,8 +253,10 @@ def _eligible_volatility_point(item: EnrichedOptionQuote, maximum_spread: float)
         item.implied_volatility is not None
         and item.forward_price is not None
         and not any(issue in blockers for issue in item.quality_issues)
-        and item.relative_spread is not None
-        and item.relative_spread <= maximum_spread
+        and (
+            item.market_price_source is MarketPriceSource.END_OF_DAY_CLOSE
+            or (item.relative_spread is not None and item.relative_spread <= maximum_spread)
+        )
     )
 
 
@@ -432,7 +439,11 @@ def _american_analytics(
     )
 
 
-def _quality_flags(item: EnrichedOptionQuote, maximum_spread: float) -> list[str]:
+def _quality_flags(
+    item: EnrichedOptionQuote,
+    maximum_spread: float,
+    valuation_time: datetime,
+) -> list[str]:
     flags = [issue.value for issue in item.quality_issues]
     if item.relative_spread is not None and item.relative_spread > maximum_spread:
         flags.append("WIDE_SPREAD")
@@ -442,6 +453,17 @@ def _quality_flags(item: EnrichedOptionQuote, maximum_spread: float) -> list[str
         flags.append("NO_OPEN_INTEREST")
     if (not item.quote.volume and not item.quote.open_interest) or "WIDE_SPREAD" in flags:
         flags.append("ILLIQUID")
+    if item.quote.market_data_mode is MarketDataMode.END_OF_DAY:
+        flags.extend(
+            [
+                "END_OF_DAY_DATA",
+                "SNAPSHOT_UNAVAILABLE_FOR_PLAN",
+                "NO_LIVE_BID_ASK",
+                "LOW_PROVIDER_RATE_LIMIT",
+            ]
+        )
+        if item.quote.data_date is not None and item.quote.data_date != valuation_time.date():
+            flags.append("DATA_DATE_MISMATCH")
     return list(dict.fromkeys(flags))
 
 
@@ -485,7 +507,9 @@ def _analyze_contract(
 ) -> AnalyzedOptionContract:
     quote = item.quote
     instrument = quote.instrument
-    warnings = ["BSM_EQUIVALENT_IMPLIED_VOLATILITY", *fair_volatility.warnings]
+    eod_mode = quote.market_data_mode is MarketDataMode.END_OF_DAY
+    iv_method = "EOD_BSM_EQUIVALENT_IV" if eod_mode else "BSM_EQUIVALENT"
+    warnings = [iv_method, *fair_volatility.warnings]
     if instrument.exercise_style is not MarketExerciseStyle.AMERICAN:
         warnings.append("AMERICAN_EXERCISE_ASSUMED_FOR_EQUITY_WORKFLOW")
     analytics: _AmericanAnalytics | None = None
@@ -510,16 +534,28 @@ def _analyze_contract(
             warnings.append("AMERICAN_PRICING_FAILED")
     fair_value = None if analytics is None else analytics.result.price
     market_midpoint = quote.midpoint
-    gap = None if fair_value is None or market_midpoint is None else fair_value - market_midpoint
+    market_reference_price = item.market_price
+    comparison_price = item.market_price if eod_mode else market_midpoint
+    if comparison_price is None:
+        comparison_source = None
+    elif item.market_price_source is MarketPriceSource.END_OF_DAY_CLOSE:
+        comparison_source = ComparisonPriceSource.END_OF_DAY_CLOSE
+    elif item.market_price_source is MarketPriceSource.MIDPOINT:
+        comparison_source = ComparisonPriceSource.BID_ASK_MIDPOINT
+    elif item.market_price_source is MarketPriceSource.LAST:
+        comparison_source = ComparisonPriceSource.LAST_TRADE
+    else:
+        comparison_source = None
+    gap = None if fair_value is None or comparison_price is None else fair_value - comparison_price
     gap_pct = (
         None
-        if gap is None or market_midpoint is None or market_midpoint <= 0.0
-        else gap / market_midpoint
+        if gap is None or comparison_price is None or comparison_price <= 0.0
+        else gap / comparison_price
     )
     intrinsic = intrinsic_value(instrument.option_type, spot, instrument.strike)
     market_reference = item.market_price
     time_value = None if market_reference is None else max(market_reference - intrinsic, 0.0)
-    quality_flags = _quality_flags(item, maximum_spread)
+    quality_flags = _quality_flags(item, maximum_spread, valuation_time)
     quote_age = (valuation_time - quote.timestamp).total_seconds()
     return AnalyzedOptionContract(
         provider_symbol=instrument.provider_symbol,
@@ -531,6 +567,9 @@ def _analyze_contract(
         ask=quote.ask,
         market_midpoint=market_midpoint,
         market_price_source=item.market_price_source,
+        market_reference_price=market_reference_price,
+        comparison_price=comparison_price,
+        comparison_price_source=comparison_source,
         last=quote.last,
         bid_size=quote.bid_size,
         ask_size=quote.ask_size,
@@ -542,6 +581,7 @@ def _analyze_contract(
         time_to_expiration_years=item.maturity_years,
         implied_volatility=item.implied_volatility,
         implied_volatility_status=item.iv_status,
+        implied_volatility_method=iv_method,
         provider_implied_volatility=quote.provider_implied_volatility,
         fair_value_volatility=fair_volatility.value,
         fair_value_volatility_source=fair_volatility.source,
@@ -579,6 +619,13 @@ def _analyze_contract(
         analysis_quality=_analysis_quality(quality_flags, fair_volatility, fair_value),
         quality_flags=quality_flags,
         warning_flags=list(dict.fromkeys(warnings)),
+        market_data_mode=quote.market_data_mode,
+        eod_open=quote.eod_open,
+        eod_high=quote.eod_high,
+        eod_low=quote.eod_low,
+        eod_close=quote.eod_close,
+        eod_vwap=quote.eod_vwap,
+        data_date=quote.data_date,
     )
 
 
@@ -630,8 +677,18 @@ def analyze_american_options(
 
     market_started = perf_counter()
     underlying_quote = provider.get_underlying_quote(request.symbol)
-    expirations = provider.list_option_expirations(request.symbol)
-    valuation_date = datetime.now(UTC).date()
+    valuation_date = (
+        underlying_quote.data_date
+        if underlying_quote.market_data_mode is MarketDataMode.END_OF_DAY
+        and underlying_quote.data_date is not None
+        else datetime.now(UTC).date()
+    )
+    target_date = request.expiration or (valuation_date + timedelta(days=target_days))
+    expirations = provider.list_option_expirations(
+        request.symbol,
+        target_date=target_date,
+        strike_window_pct=strike_window,
+    )
     if request.expiration is not None:
         if request.expiration not in expirations:
             raise MarketDataValidationError(
@@ -640,14 +697,24 @@ def analyze_american_options(
         selected_expiration = request.expiration
     else:
         selected_expiration = select_default_expiration(expirations, valuation_date, target_days)
-    snapshot = provider.get_option_chain(request.symbol, selected_expiration)
+    requested_side = (
+        None
+        if request.option_type is AnalysisOptionType.BOTH
+        else OptionType(request.option_type.value)
+    )
+    snapshot = provider.get_option_chain(
+        request.symbol,
+        selected_expiration,
+        option_type=requested_side,
+        max_contracts=request.max_contracts,
+    )
     if len(snapshot.quotes) > settings.max_option_chain_contracts:
         raise MarketDataValidationError(
             "option chain exceeds configured limit of "
             f"{settings.max_option_chain_contracts} contracts"
         )
     valuation_time = snapshot.retrieved_at.astimezone(UTC)
-    snapshot = snapshot.model_copy(update={"underlying_quote": underlying_quote})
+    underlying_quote = snapshot.underlying_quote
     spot = _underlying_price(underlying_quote)
     source_quotes = bounded_source_quotes(
         snapshot.quotes,
@@ -665,6 +732,8 @@ def analyze_american_options(
         source=snapshot.source,
         quotes=source_quotes,
         available_expirations=[selected_expiration],
+        market_data_mode=snapshot.market_data_mode,
+        capabilities=snapshot.capabilities,
     )
     market_data_ms = (perf_counter() - market_started) * 1_000.0
 
@@ -723,7 +792,16 @@ def analyze_american_options(
     )
     underlying_age = (valuation_time - underlying_quote.timestamp).total_seconds()
     warnings: list[str] = []
-    if underlying_age > max_quote_age:
+    if snapshot.market_data_mode is MarketDataMode.END_OF_DAY:
+        warnings.append(
+            "Using Massive end-of-day data because snapshot access is not included in the "
+            "current provider plan."
+        )
+        warnings.append(
+            f"Massive Basic analysis is limited to {snapshot.capabilities.basic_contract_limit} "
+            "near-ATM contract observations per cold request."
+        )
+    elif underlying_age > max_quote_age:
         warnings.append(
             "Delayed/stale market data: the underlying quote exceeds the age threshold."
         )
@@ -735,6 +813,10 @@ def analyze_american_options(
         )
     if any(QuoteIssue.STALE.value in contract.quality_flags for contract in analyzed):
         warnings.append("Delayed/stale market data is present in the selected option contracts.")
+    if any("DATA_DATE_MISMATCH" in contract.quality_flags for contract in analyzed):
+        warnings.append(
+            "One or more option bars are not aligned with the underlying end-of-day date."
+        )
     if not any(contract.fair_value_volatility_independent for contract in analyzed):
         warnings.append(
             "No independent neighboring volatility estimate was available; "
@@ -744,6 +826,22 @@ def analyze_american_options(
     return OptionsAnalysisResult(
         symbol=request.symbol,
         data_source=snapshot.source,
+        data_mode=snapshot.market_data_mode,
+        price_as_of=valuation_time,
+        underlying_price_source=underlying_quote.price_source,
+        option_price_source=(
+            ComparisonPriceSource.END_OF_DAY_CLOSE
+            if snapshot.market_data_mode is MarketDataMode.END_OF_DAY
+            else next(
+                (
+                    contract.comparison_price_source
+                    for contract in analyzed
+                    if contract.comparison_price_source is not None
+                ),
+                ComparisonPriceSource.BID_ASK_MIDPOINT,
+            )
+        ),
+        provider_capabilities=snapshot.capabilities,
         underlying=AnalyzerUnderlyingQuote(
             price=spot,
             bid=underlying_quote.bid,
@@ -752,6 +850,14 @@ def analyze_american_options(
             timestamp=underlying_quote.timestamp,
             data_age_seconds=underlying_age,
             source=underlying_quote.source,
+            price_source=underlying_quote.price_source,
+            open=underlying_quote.open,
+            high=underlying_quote.high,
+            low=underlying_quote.low,
+            close=underlying_quote.close,
+            vwap=underlying_quote.vwap,
+            volume=underlying_quote.volume,
+            data_date=underlying_quote.data_date,
         ),
         selected_expiration=selected_expiration,
         available_expirations=bounded_expirations,
@@ -765,6 +871,11 @@ def analyze_american_options(
                 "CONFIGURED_DEFAULT" if request.dividend_yield is None else "REQUEST_OVERRIDE"
             ),
             valuation_time=valuation_time,
+            implied_volatility_method=(
+                "EOD_BSM_EQUIVALENT_IV"
+                if snapshot.market_data_mode is MarketDataMode.END_OF_DAY
+                else "BSM_EQUIVALENT"
+            ),
             tree_steps=tree_steps,
             target_expiration_days=target_days,
             selected_expiration_days=max((selected_expiration - valuation_time.date()).days, 0),

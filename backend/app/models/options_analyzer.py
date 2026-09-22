@@ -7,9 +7,13 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.app.models.market_data import (
+    ComparisonPriceSource,
+    MarketDataMode,
     MarketDataSource,
     MarketExerciseStyle,
     MarketPriceSource,
+    ProviderCapabilities,
+    UnderlyingPriceSource,
 )
 from backend.app.models.option import ExerciseStyle, OptionType
 from backend.app.models.volatility import ImpliedVolatilityStatus
@@ -90,6 +94,14 @@ class AnalyzerUnderlyingQuote(AnalyzerModel):
     timestamp: datetime
     data_age_seconds: float
     source: MarketDataSource
+    price_source: UnderlyingPriceSource = UnderlyingPriceSource.SNAPSHOT_QUOTE
+    open: NonNegativeFloat | None = None
+    high: NonNegativeFloat | None = None
+    low: NonNegativeFloat | None = None
+    close: NonNegativeFloat | None = None
+    vwap: NonNegativeFloat | None = None
+    volume: NonNegativeFloat | None = None
+    data_date: date | None = None
 
 
 class AnalysisAssumptions(AnalyzerModel):
@@ -101,7 +113,7 @@ class AnalysisAssumptions(AnalyzerModel):
     dividend_yield_source: Literal["CONFIGURED_DEFAULT", "REQUEST_OVERRIDE"]
     valuation_time: datetime
     pricing_model: Literal["CRR_AMERICAN"] = "CRR_AMERICAN"
-    implied_volatility_method: Literal["BSM_EQUIVALENT"] = "BSM_EQUIVALENT"
+    implied_volatility_method: Literal["BSM_EQUIVALENT", "EOD_BSM_EQUIVALENT_IV"] = "BSM_EQUIVALENT"
     tree_steps: PositiveInt
     target_expiration_days: PositiveInt
     selected_expiration_days: int = Field(ge=0)
@@ -161,6 +173,9 @@ class AnalyzedOptionContract(AnalyzerModel):
     ask: float | None = None
     market_midpoint: NonNegativeFloat | None = None
     market_price_source: MarketPriceSource | None = None
+    market_reference_price: NonNegativeFloat | None = None
+    comparison_price: NonNegativeFloat | None = None
+    comparison_price_source: ComparisonPriceSource | None = None
     last: float | None = None
     bid_size: int | None = Field(default=None, ge=0)
     ask_size: int | None = Field(default=None, ge=0)
@@ -172,7 +187,7 @@ class AnalyzedOptionContract(AnalyzerModel):
     time_to_expiration_years: NonNegativeFloat
     implied_volatility: NonNegativeFloat | None = None
     implied_volatility_status: ImpliedVolatilityStatus | None = None
-    implied_volatility_method: Literal["BSM_EQUIVALENT"] = "BSM_EQUIVALENT"
+    implied_volatility_method: Literal["BSM_EQUIVALENT", "EOD_BSM_EQUIVALENT_IV"] = "BSM_EQUIVALENT"
     provider_implied_volatility: NonNegativeFloat | None = None
     fair_value_volatility: NonNegativeFloat | None = None
     fair_value_volatility_source: FairValueVolatilitySource
@@ -202,6 +217,13 @@ class AnalyzedOptionContract(AnalyzerModel):
     analysis_quality: AnalysisDataQuality
     quality_flags: list[str]
     warning_flags: list[str]
+    market_data_mode: MarketDataMode = MarketDataMode.SNAPSHOT
+    eod_open: NonNegativeFloat | None = None
+    eod_high: NonNegativeFloat | None = None
+    eod_low: NonNegativeFloat | None = None
+    eod_close: NonNegativeFloat | None = None
+    eod_vwap: NonNegativeFloat | None = None
+    data_date: date | None = None
 
 
 class OptionsAnalysisResult(AnalyzerModel):
@@ -209,6 +231,11 @@ class OptionsAnalysisResult(AnalyzerModel):
 
     symbol: str
     data_source: MarketDataSource
+    data_mode: MarketDataMode = MarketDataMode.SNAPSHOT
+    price_as_of: datetime
+    underlying_price_source: UnderlyingPriceSource
+    option_price_source: ComparisonPriceSource
+    provider_capabilities: ProviderCapabilities
     underlying: AnalyzerUnderlyingQuote
     selected_expiration: date
     available_expirations: list[date]

@@ -5,6 +5,7 @@ import {
   analyzeOptions,
   type AnalysisOptionType,
   type AnalyzedOptionContract,
+  type MarketDataMode,
   type OptionsAnalysisRequest,
 } from '../api/optionsAnalyzer'
 import { MultiSeriesLineChart } from '../components/visualization/MultiSeriesLineChart'
@@ -19,7 +20,7 @@ import {
   formatVolatility,
 } from '../utils/formatters'
 
-type SortKey = 'strike' | 'bid' | 'ask' | 'market_midpoint' | 'fair_value' | 'fair_value_gap_pct' | 'implied_volatility' | 'fair_value_volatility' | 'delta' | 'theta_daily' | 'volume' | 'open_interest'
+type SortKey = 'strike' | 'bid' | 'ask' | 'market_midpoint' | 'comparison_price' | 'fair_value' | 'fair_value_gap_pct' | 'implied_volatility' | 'fair_value_volatility' | 'delta' | 'theta_daily' | 'volume' | 'open_interest'
 
 const loadingStages = [
   'Fetching underlying quote…',
@@ -39,7 +40,8 @@ function gapClass(value: number | null): string {
   return value > 0 ? 'gap-positive' : 'gap-negative'
 }
 
-function ContractDetails({ contract, onClose }: { contract: AnalyzedOptionContract; onClose: () => void }) {
+function ContractDetails({ contract, dataMode, onClose }: { contract: AnalyzedOptionContract; dataMode: MarketDataMode; onClose: () => void }) {
+  const isEod = dataMode === 'END_OF_DAY'
   return (
     <Card className="contract-detail">
       <div className="contract-detail__header">
@@ -47,12 +49,12 @@ function ContractDetails({ contract, onClose }: { contract: AnalyzedOptionContra
         <Button onClick={onClose} size="small" variant="ghost">Close details</Button>
       </div>
       <div className="detail-grid">
-        <section><h3>Market</h3><dl><dt>Bid / ask</dt><dd>{formatCurrency(contract.bid)} / {formatCurrency(contract.ask)}</dd><dt>Midpoint</dt><dd>{formatCurrency(contract.market_midpoint)}</dd><dt>Spread</dt><dd>{formatCurrency(contract.spread)} ({formatPercent(contract.spread_pct)})</dd><dt>Volume / open interest</dt><dd>{formatCount(contract.volume)} / {formatCount(contract.open_interest)}</dd><dt>Bid / ask size</dt><dd>{formatCount(contract.bid_size)} / {formatCount(contract.ask_size)}</dd></dl></section>
+        {isEod ? <section><h3>Market data</h3><dl><dt>EOD close / reference</dt><dd>{formatCurrency(contract.market_reference_price)}</dd><dt>Open / high / low</dt><dd>{formatCurrency(contract.eod_open)} / {formatCurrency(contract.eod_high)} / {formatCurrency(contract.eod_low)}</dd><dt>VWAP</dt><dd>{formatCurrency(contract.eod_vwap)}</dd><dt>Volume</dt><dd>{formatCount(contract.volume)}</dd><dt>Data date</dt><dd>{contract.data_date ?? 'Unavailable'}</dd><dt>Live bid / ask / spread</dt><dd>Unavailable on this data mode</dd></dl></section> : <section><h3>Market data</h3><dl><dt>Bid / ask</dt><dd>{formatCurrency(contract.bid)} / {formatCurrency(contract.ask)}</dd><dt>Midpoint</dt><dd>{formatCurrency(contract.market_midpoint)}</dd><dt>Spread</dt><dd>{formatCurrency(contract.spread)} ({formatPercent(contract.spread_pct)})</dd><dt>Volume / open interest</dt><dd>{formatCount(contract.volume)} / {formatCount(contract.open_interest)}</dd><dt>Bid / ask size</dt><dd>{formatCount(contract.bid_size)} / {formatCount(contract.ask_size)}</dd></dl></section>}
         <section><h3>Contract</h3><dl><dt>Expiration</dt><dd>{contract.expiration}</dd><dt>Days to expiration</dt><dd>{contract.days_to_expiration}</dd><dt>Exercise style</dt><dd>{contract.exercise_style}</dd><dt>Intrinsic / time value</dt><dd>{formatCurrency(contract.intrinsic_value)} / {formatCurrency(contract.time_value)}</dd></dl></section>
-        <section><h3>Volatility</h3><dl><dt>Market IV</dt><dd>{formatVolatility(contract.implied_volatility)} <small>BSM-equivalent</small></dd><dt>Fair-value vol</dt><dd>{formatVolatility(contract.fair_value_volatility)}</dd><dt>Fair-vol source</dt><dd>{contract.fair_value_volatility_source.replaceAll('_', ' ')}</dd><dt>Provider IV</dt><dd>{formatVolatility(contract.provider_implied_volatility)}</dd></dl></section>
-        <section><h3>Fair value</h3><dl><dt>CRR American value</dt><dd>{formatCurrency(contract.fair_value)}</dd><dt>Market midpoint</dt><dd>{formatCurrency(contract.market_midpoint)}</dd><dt>Fair-value gap</dt><dd className={gapClass(contract.fair_value_gap)}>{formatCurrency(contract.fair_value_gap)} ({formatPercent(contract.fair_value_gap_pct)})</dd><dt>Early-exercise premium</dt><dd>{formatCurrency(contract.early_exercise_premium)}</dd></dl></section>
+        <section><h3>Volatility</h3><dl><dt>{isEod ? 'EOD IV' : 'Market IV'}</dt><dd>{formatVolatility(contract.implied_volatility)} <small>{isEod ? 'EOD BSM-equivalent' : 'BSM-equivalent'}</small></dd><dt>Fair-value vol</dt><dd>{formatVolatility(contract.fair_value_volatility)}</dd><dt>Fair-vol source</dt><dd>{contract.fair_value_volatility_source.replaceAll('_', ' ')}</dd><dt>Provider IV</dt><dd>{formatVolatility(contract.provider_implied_volatility)}</dd></dl></section>
+        <section><h3>Fair value</h3><dl><dt>CRR American value</dt><dd>{formatCurrency(contract.fair_value)}</dd><dt>{isEod ? 'EOD comparison price' : 'Market midpoint'}</dt><dd>{formatCurrency(contract.comparison_price)}</dd><dt>Fair-value gap</dt><dd className={gapClass(contract.fair_value_gap)}>{formatCurrency(contract.fair_value_gap)} ({formatPercent(contract.fair_value_gap_pct)})</dd><dt>Early-exercise premium</dt><dd>{formatCurrency(contract.early_exercise_premium)}</dd></dl></section>
         <section><h3>Greeks</h3><dl><dt>Delta</dt><dd>{formatGreek(contract.delta)}</dd><dt>Gamma</dt><dd>{formatGreek(contract.gamma)}</dd><dt>Vega / vol point</dt><dd>{formatGreek(contract.vega_per_vol_point)}</dd><dt>Theta / day</dt><dd>{formatGreek(contract.theta_daily)}</dd><dt>Rho</dt><dd>{formatGreek(contract.rho)}</dd></dl></section>
-        <section><h3>Diagnostics</h3><dl><dt>Quote age</dt><dd>{formatDecimal(contract.quote_age_seconds, { maximumFractionDigits: 0 })} sec</dd><dt>Data quality</dt><dd>{contract.analysis_quality.replaceAll('_', ' ')}</dd><dt>IV status</dt><dd>{contract.implied_volatility_status ?? 'Unavailable'}</dd><dt>Tree</dt><dd>{contract.tree_steps} steps · {formatRuntime(contract.model_runtime_ms)}</dd></dl><div className="flag-list">{[...contract.quality_flags, ...contract.warning_flags].map((flag) => <Badge key={flag} variant="warning">{flag.replaceAll('_', ' ')}</Badge>)}</div></section>
+        <section><h3>Diagnostics</h3><dl>{isEod ? <><dt>Data date</dt><dd>{contract.data_date ?? 'Unavailable'}</dd></> : <><dt>Quote age</dt><dd>{formatDecimal(contract.quote_age_seconds, { maximumFractionDigits: 0 })} sec</dd></>}<dt>Data quality</dt><dd>{contract.analysis_quality.replaceAll('_', ' ')}</dd><dt>IV status</dt><dd>{contract.implied_volatility_status ?? 'Unavailable'}</dd><dt>Tree</dt><dd>{contract.tree_steps} steps · {formatRuntime(contract.model_runtime_ms)}</dd></dl><div className="flag-list">{[...contract.quality_flags, ...contract.warning_flags].map((flag) => <Badge key={flag} variant="warning">{flag.replaceAll('_', ' ')}</Badge>)}</div></section>
       </div>
     </Card>
   )
@@ -131,6 +133,7 @@ export default function AnalyzePage() {
     })
   }, [analysis.data, side, sortAscending, sortKey])
   const selected = analysis.data?.contracts.find((contract) => contract.provider_symbol === selectedSymbol)
+  const isEod = analysis.data?.data_mode === 'END_OF_DAY'
   const sort = (key: SortKey) => {
     if (sortKey === key) setSortAscending((value) => !value)
     else { setSortKey(key); setSortAscending(true) }
@@ -169,14 +172,14 @@ export default function AnalyzePage() {
       {analysis.data ? (
         <>
           <section className="analysis-header" aria-labelledby="analysis-heading">
-            <div><span className="page-header__eyebrow">Analysis result</span><h2 id="analysis-heading">{analysis.data.symbol}</h2><p>Underlying price <strong>{formatCurrency(analysis.data.underlying.price)}</strong> · Quote time {new Date(analysis.data.underlying.timestamp).toLocaleString()}</p></div>
+            <div><span className="page-header__eyebrow">Analysis result</span><h2 id="analysis-heading">{analysis.data.symbol}</h2><div className="data-mode-line"><Badge variant={isEod ? 'warning' : 'success'}>{isEod ? 'End-of-day data' : 'Snapshot data'}</Badge></div><p>Underlying price <strong>{formatCurrency(analysis.data.underlying.price)}</strong> · Data as of {new Date(analysis.data.price_as_of).toLocaleString()}</p></div>
             <Button disabled={analysis.isFetching} onClick={() => void analysis.refetch()} size="small" variant="secondary">Refresh data</Button>
             <div className="analysis-facts">
               <Select label="Selected expiration" onChange={(event) => { setLoadingStage(0); setSelectedSymbol(undefined); setRequest(makeRequest(event.target.value)) }} options={analysis.data.available_expirations.map((expiration) => ({ label: expiration, value: expiration }))} value={analysis.data.selected_expiration} />
               <div><span>Days to expiration</span><strong>{analysis.data.assumptions.selected_expiration_days}</strong></div>
               <div><span>ATM strike</span><strong>{formatCurrency(analysis.data.summary.atm_strike)}</strong></div>
               <div><span>Contracts analyzed</span><strong>{analysis.data.summary.contracts_analyzed}</strong></div>
-              <div><span>Data source</span><strong>{analysis.data.data_source}</strong></div>
+              <div><span>Data source</span><strong>{analysis.data.data_source} · {analysis.data.underlying_price_source.replaceAll('_', ' ')}</strong></div>
               <div><span>Data age</span><strong>{formatDecimal(analysis.data.underlying.data_age_seconds, { maximumFractionDigits: 0 })} sec</strong></div>
             </div>
             <p className="assumption-line">CRR American · {analysis.data.assumptions.tree_steps} steps · risk-free rate {formatPercent(analysis.data.assumptions.risk_free_rate)} ({analysis.data.assumptions.risk_free_rate_source.toLowerCase().replaceAll('_', ' ')}) · dividend yield {formatPercent(analysis.data.assumptions.dividend_yield)} ({analysis.data.assumptions.dividend_yield_source.toLowerCase().replaceAll('_', ' ')})</p>
@@ -192,14 +195,14 @@ export default function AnalyzePage() {
           <div className="chain-table-wrap">
             <table className="chain-table">
               <caption>American options model comparison for {analysis.data.symbol}</caption>
-              <thead><tr><th>{sortButton('Strike', 'strike')}</th><th>Type</th><th>{sortButton('Bid', 'bid')}</th><th>{sortButton('Ask', 'ask')}</th><th>{sortButton('Market', 'market_midpoint')}</th><th>{sortButton('Fair value', 'fair_value')}</th><th>{sortButton('Gap %', 'fair_value_gap_pct')}</th><th>{sortButton('IV', 'implied_volatility')}</th><th>{sortButton('Fair vol', 'fair_value_volatility')}</th><th>{sortButton('Delta', 'delta')}</th><th>{sortButton('Theta/day', 'theta_daily')}</th><th>{sortButton('Volume', 'volume')}</th><th>{sortButton('Open interest', 'open_interest')}</th><th>Details</th></tr></thead>
-              <tbody>{contracts.map((contract) => <tr className={selectedSymbol === contract.provider_symbol ? 'is-selected' : ''} key={contract.provider_symbol}><td>{formatCurrency(contract.strike)}</td><td>{contract.option_type}</td><td>{formatCurrency(contract.bid)}</td><td>{formatCurrency(contract.ask)}</td><td>{formatCurrency(contract.market_midpoint)}</td><td>{formatCurrency(contract.fair_value)}</td><td className={gapClass(contract.fair_value_gap_pct)}>{formatPercent(contract.fair_value_gap_pct)}</td><td>{formatVolatility(contract.implied_volatility)}</td><td>{formatVolatility(contract.fair_value_volatility)}</td><td>{formatGreek(contract.delta)}</td><td>{formatGreek(contract.theta_daily)}</td><td>{formatCount(contract.volume)}</td><td>{formatCount(contract.open_interest)}</td><td><Button aria-label={`View details for ${contract.provider_symbol}`} onClick={() => setSelectedSymbol(contract.provider_symbol)} size="small" variant="ghost">View</Button></td></tr>)}</tbody>
+              <thead><tr><th>{sortButton('Strike', 'strike')}</th><th>Type</th>{isEod ? <><th>{sortButton('EOD Price', 'comparison_price')}</th><th>{sortButton('Fair value', 'fair_value')}</th><th>{sortButton('Gap %', 'fair_value_gap_pct')}</th><th>{sortButton('EOD IV', 'implied_volatility')}</th><th>{sortButton('Fair vol', 'fair_value_volatility')}</th><th>{sortButton('Delta', 'delta')}</th><th>{sortButton('Theta/day', 'theta_daily')}</th><th>{sortButton('Volume', 'volume')}</th><th>Data Date</th><th>Details</th></> : <><th>{sortButton('Bid', 'bid')}</th><th>{sortButton('Ask', 'ask')}</th><th>{sortButton('Market', 'market_midpoint')}</th><th>{sortButton('Fair value', 'fair_value')}</th><th>{sortButton('Gap %', 'fair_value_gap_pct')}</th><th>{sortButton('IV', 'implied_volatility')}</th><th>{sortButton('Fair vol', 'fair_value_volatility')}</th><th>{sortButton('Delta', 'delta')}</th><th>{sortButton('Theta/day', 'theta_daily')}</th><th>{sortButton('Volume', 'volume')}</th><th>{sortButton('Open interest', 'open_interest')}</th><th>Details</th></>}</tr></thead>
+              <tbody>{contracts.map((contract) => <tr className={selectedSymbol === contract.provider_symbol ? 'is-selected' : ''} key={contract.provider_symbol}><td>{formatCurrency(contract.strike)}</td><td>{contract.option_type}</td>{isEod ? <><td>{formatCurrency(contract.comparison_price)}</td><td>{formatCurrency(contract.fair_value)}</td><td className={gapClass(contract.fair_value_gap_pct)}>{formatPercent(contract.fair_value_gap_pct)}</td><td>{formatVolatility(contract.implied_volatility)}</td><td>{formatVolatility(contract.fair_value_volatility)}</td><td>{formatGreek(contract.delta)}</td><td>{formatGreek(contract.theta_daily)}</td><td>{formatCount(contract.volume)}</td><td>{contract.data_date ?? '—'}</td><td><Button aria-label={`View details for ${contract.provider_symbol}`} onClick={() => setSelectedSymbol(contract.provider_symbol)} size="small" variant="ghost">View</Button></td></> : <><td>{formatCurrency(contract.bid)}</td><td>{formatCurrency(contract.ask)}</td><td>{formatCurrency(contract.market_midpoint)}</td><td>{formatCurrency(contract.fair_value)}</td><td className={gapClass(contract.fair_value_gap_pct)}>{formatPercent(contract.fair_value_gap_pct)}</td><td>{formatVolatility(contract.implied_volatility)}</td><td>{formatVolatility(contract.fair_value_volatility)}</td><td>{formatGreek(contract.delta)}</td><td>{formatGreek(contract.theta_daily)}</td><td>{formatCount(contract.volume)}</td><td>{formatCount(contract.open_interest)}</td><td><Button aria-label={`View details for ${contract.provider_symbol}`} onClick={() => setSelectedSymbol(contract.provider_symbol)} size="small" variant="ghost">View</Button></td></>}</tr>)}</tbody>
             </table>
           </div>
 
-          {selected ? <ContractDetails contract={selected} onClose={() => setSelectedSymbol(undefined)} /> : null}
+          {selected ? <ContractDetails contract={selected} dataMode={analysis.data.data_mode} onClose={() => setSelectedSymbol(undefined)} /> : null}
 
-          <section aria-labelledby="smile-heading"><div className="section__header"><div><h2 id="smile-heading">Volatility smile</h2><p>BSM-equivalent market IV and the independent volatility used by the American fair-value model.</p></div></div><MultiSeriesLineChart series={[{ label: 'Market IV', points: analysis.data.smile.filter((point) => point.market_implied_volatility !== null && (side === 'BOTH' || point.option_type === side)).map((point) => ({ x: point.strike, y: point.market_implied_volatility as number, selected: point.provider_symbol === selectedSymbol })) }, { label: 'Fair-value vol', points: analysis.data.smile.filter((point) => point.fair_value_volatility !== null && (side === 'BOTH' || point.option_type === side)).map((point) => ({ x: point.strike, y: point.fair_value_volatility as number, selected: point.provider_symbol === selectedSymbol })) }]} title="Selected-expiration volatility smile" xLabel="Strike" yLabel="Implied volatility" /></section>
+          <section aria-labelledby="smile-heading"><div className="section__header"><div><h2 id="smile-heading">Volatility smile</h2><p>{isEod ? 'EOD BSM-equivalent IV' : 'BSM-equivalent market IV'} and the independent volatility used by the American fair-value model.</p></div></div><MultiSeriesLineChart series={[{ label: isEod ? 'EOD IV' : 'Market IV', points: analysis.data.smile.filter((point) => point.market_implied_volatility !== null && (side === 'BOTH' || point.option_type === side)).map((point) => ({ x: point.strike, y: point.market_implied_volatility as number, selected: point.provider_symbol === selectedSymbol })) }, { label: 'Fair-value vol', points: analysis.data.smile.filter((point) => point.fair_value_volatility !== null && (side === 'BOTH' || point.option_type === side)).map((point) => ({ x: point.strike, y: point.fair_value_volatility as number, selected: point.provider_symbol === selectedSymbol })) }]} title="Selected-expiration volatility smile" xLabel="Strike" yLabel="Implied volatility" /></section>
           <p className="fine-print">Local timing: market data {formatRuntime(analysis.data.timings.market_data_ms)}, IV {formatRuntime(analysis.data.timings.implied_volatility_ms)}, smile {formatRuntime(analysis.data.timings.smile_construction_ms)}, CRR and Greeks {formatRuntime(analysis.data.timings.pricing_and_greeks_ms)}.</p>
         </>
       ) : null}

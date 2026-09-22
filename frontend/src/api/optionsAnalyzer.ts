@@ -2,6 +2,8 @@ import { apiPost } from './client'
 
 export type AnalysisOptionType = 'CALL' | 'PUT' | 'BOTH'
 export type OptionType = 'CALL' | 'PUT'
+export type MarketDataMode = 'SNAPSHOT' | 'END_OF_DAY'
+export type ComparisonPriceSource = 'BID_ASK_MIDPOINT' | 'LAST_TRADE' | 'END_OF_DAY_CLOSE'
 export type FairValueVolatilitySource =
   | 'SMILE_INTERPOLATED'
   | 'ATM_REFERENCE'
@@ -32,7 +34,10 @@ export interface AnalyzedOptionContract {
   bid: number | null
   ask: number | null
   market_midpoint: number | null
-  market_price_source: 'MIDPOINT' | 'LAST' | null
+  market_price_source: 'MIDPOINT' | 'LAST' | 'END_OF_DAY_CLOSE' | null
+  market_reference_price: number | null
+  comparison_price: number | null
+  comparison_price_source: ComparisonPriceSource | null
   last: number | null
   bid_size: number | null
   ask_size: number | null
@@ -44,7 +49,7 @@ export interface AnalyzedOptionContract {
   time_to_expiration_years: number
   implied_volatility: number | null
   implied_volatility_status: string | null
-  implied_volatility_method: 'BSM_EQUIVALENT'
+  implied_volatility_method: 'BSM_EQUIVALENT' | 'EOD_BSM_EQUIVALENT_IV'
   provider_implied_volatility: number | null
   fair_value_volatility: number | null
   fair_value_volatility_source: FairValueVolatilitySource
@@ -74,6 +79,13 @@ export interface AnalyzedOptionContract {
   analysis_quality: 'HIGH_DATA_QUALITY' | 'MODERATE_DATA_QUALITY' | 'LOW_DATA_QUALITY'
   quality_flags: string[]
   warning_flags: string[]
+  market_data_mode: MarketDataMode
+  eod_open: number | null
+  eod_high: number | null
+  eod_low: number | null
+  eod_close: number | null
+  eod_vwap: number | null
+  data_date: string | null
 }
 
 export interface AnalyzerSmilePoint {
@@ -89,6 +101,15 @@ export interface AnalyzerSmilePoint {
 export interface OptionsAnalysisResult {
   symbol: string
   data_source: 'MASSIVE' | 'FAKE'
+  data_mode: MarketDataMode
+  price_as_of: string
+  underlying_price_source: 'SNAPSHOT_QUOTE' | 'END_OF_DAY_CLOSE'
+  option_price_source: ComparisonPriceSource
+  provider_capabilities: {
+    snapshot_available: boolean
+    end_of_day_available: boolean
+    basic_contract_limit: number | null
+  }
   underlying: {
     price: number
     bid: number | null
@@ -97,6 +118,14 @@ export interface OptionsAnalysisResult {
     timestamp: string
     data_age_seconds: number
     source: 'MASSIVE' | 'FAKE'
+    price_source: 'SNAPSHOT_QUOTE' | 'END_OF_DAY_CLOSE'
+    open: number | null
+    high: number | null
+    low: number | null
+    close: number | null
+    vwap: number | null
+    volume: number | null
+    data_date: string | null
   }
   selected_expiration: string
   available_expirations: string[]
@@ -107,7 +136,7 @@ export interface OptionsAnalysisResult {
     dividend_yield_source: 'CONFIGURED_DEFAULT' | 'REQUEST_OVERRIDE'
     valuation_time: string
     pricing_model: 'CRR_AMERICAN'
-    implied_volatility_method: 'BSM_EQUIVALENT'
+    implied_volatility_method: 'BSM_EQUIVALENT' | 'EOD_BSM_EQUIVALENT_IV'
     tree_steps: number
     target_expiration_days: number
     selected_expiration_days: number

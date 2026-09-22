@@ -736,6 +736,10 @@ legend {
   font-size: 1.8rem;
 }
 
+.data-mode-line {
+  margin-top: var(--space-2);
+}
+
 .analysis-facts {
   display: grid;
   grid-column: 1 / -1;

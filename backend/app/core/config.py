@@ -107,6 +107,9 @@ class Settings(BaseModel):
     default_analysis_risk_free_rate: float = 0.04
     default_analysis_dividend_yield: float = 0.0
     default_analysis_max_relative_spread: float = Field(default=0.50, gt=0.0)
+    basic_analysis_contract_limit: int = Field(default=2, gt=0, le=5)
+    market_data_cache_ttl_seconds: float = Field(default=60.0, gt=0.0)
+    market_data_reference_window_days: int = Field(default=14, gt=0, le=90)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
     market_data_api_key: str | None = None
     market_data_base_url: str = "https://api.massive.com"
@@ -200,6 +203,8 @@ class Settings(BaseModel):
             "max_analysis_expirations",
             "default_analysis_target_days",
             "default_analysis_tree_steps",
+            "basic_analysis_contract_limit",
+            "market_data_reference_window_days",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value
@@ -235,6 +240,8 @@ class Settings(BaseModel):
             values["max_experiment_runs_per_sweep"] = value
         if value := os.getenv("MAX_QUOTE_AGE_SECONDS"):
             values["max_quote_age_seconds"] = value
+        if value := os.getenv("MARKET_DATA_CACHE_TTL_SECONDS"):
+            values["market_data_cache_ttl_seconds"] = value
         if value := os.getenv("DEFAULT_ANALYSIS_STRIKE_WINDOW_PCT"):
             values["default_analysis_strike_window_pct"] = value
         if value := os.getenv("DEFAULT_ANALYSIS_RISK_FREE_RATE"):

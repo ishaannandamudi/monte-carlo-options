@@ -17,4 +17,7 @@ def get_market_data_provider() -> MarketDataProvider:
         base_url=settings.market_data_base_url,
         timeout_seconds=settings.market_data_timeout_seconds,
         max_contracts=settings.max_option_chain_contracts,
+        basic_contract_limit=settings.basic_analysis_contract_limit,
+        cache_ttl_seconds=settings.market_data_cache_ttl_seconds,
+        reference_window_days=settings.market_data_reference_window_days,
     )
