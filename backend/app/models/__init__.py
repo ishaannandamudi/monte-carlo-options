@@ -291,6 +291,19 @@ from backend.app.models.multi_asset import (
     MultiAssetMarketEnvironment,
 )
 from backend.app.models.option import ExerciseStyle, OptionContract, OptionType
+from backend.app.models.options_analyzer import (
+    AnalysisAssumptions,
+    AnalysisDataQuality,
+    AnalysisOptionType,
+    AnalyzedOptionContract,
+    AnalyzerSmilePoint,
+    AnalyzerTiming,
+    AnalyzerUnderlyingQuote,
+    FairValueVolatilitySource,
+    OptionsAnalysisRequest,
+    OptionsAnalysisResult,
+    OptionsAnalysisSummary,
+)
 from backend.app.models.portfolio import (
     AsianPosition,
     BarrierPosition,
@@ -513,6 +526,13 @@ from backend.app.models.volatility_surface import (
 )
 
 __all__ = [
+    "AnalysisAssumptions",
+    "AnalysisDataQuality",
+    "AnalysisOptionType",
+    "AnalyzedOptionContract",
+    "AnalyzerSmilePoint",
+    "AnalyzerTiming",
+    "AnalyzerUnderlyingQuote",
     "AsianPosition",
     "AsianComparisonPoint",
     "AsianComparisonResult",
@@ -611,6 +631,7 @@ __all__ = [
     "EmpiricalCorrelationResult",
     "ExtrapolationPolicy",
     "FiniteDifferenceGreekResult",
+    "FairValueVolatilitySource",
     "Greek",
     "GreekVector",
     "GreekBumpConfig",
@@ -699,6 +720,9 @@ __all__ = [
     "OptionInstrument",
     "OptionQuote",
     "OptionType",
+    "OptionsAnalysisRequest",
+    "OptionsAnalysisResult",
+    "OptionsAnalysisSummary",
     "Portfolio",
     "PortfolioAnalysisConfig",
     "PortfolioCompleteness",

@@ -99,6 +99,14 @@ class Settings(BaseModel):
     max_benchmark_repetitions: int = Field(default=100, gt=0)
     max_option_chain_contracts: int = Field(default=5_000, gt=0)
     max_quote_age_seconds: float = Field(default=900.0, gt=0.0)
+    max_analysis_contracts: int = Field(default=100, gt=0)
+    max_analysis_expirations: int = Field(default=100, gt=0)
+    default_analysis_target_days: int = Field(default=45, gt=0)
+    default_analysis_tree_steps: int = Field(default=400, gt=0)
+    default_analysis_strike_window_pct: float = Field(default=0.15, gt=0.0, le=2.0)
+    default_analysis_risk_free_rate: float = 0.04
+    default_analysis_dividend_yield: float = 0.0
+    default_analysis_max_relative_spread: float = Field(default=0.50, gt=0.0)
     market_data_provider: Literal["MASSIVE"] = "MASSIVE"
     market_data_api_key: str | None = None
     market_data_base_url: str = "https://api.massive.com"
@@ -188,6 +196,10 @@ class Settings(BaseModel):
             "max_experiment_tags",
             "max_experiment_page_size",
             "max_benchmark_repetitions",
+            "max_analysis_contracts",
+            "max_analysis_expirations",
+            "default_analysis_target_days",
+            "default_analysis_tree_steps",
         ):
             if value := os.getenv(field.upper()):
                 values[field] = value
@@ -223,6 +235,14 @@ class Settings(BaseModel):
             values["max_experiment_runs_per_sweep"] = value
         if value := os.getenv("MAX_QUOTE_AGE_SECONDS"):
             values["max_quote_age_seconds"] = value
+        if value := os.getenv("DEFAULT_ANALYSIS_STRIKE_WINDOW_PCT"):
+            values["default_analysis_strike_window_pct"] = value
+        if value := os.getenv("DEFAULT_ANALYSIS_RISK_FREE_RATE"):
+            values["default_analysis_risk_free_rate"] = value
+        if value := os.getenv("DEFAULT_ANALYSIS_DIVIDEND_YIELD"):
+            values["default_analysis_dividend_yield"] = value
+        if value := os.getenv("DEFAULT_ANALYSIS_MAX_RELATIVE_SPREAD"):
+            values["default_analysis_max_relative_spread"] = value
         if value := os.getenv("MARKET_DATA_PROVIDER"):
             values["market_data_provider"] = value.upper()
         if value := os.getenv("MARKET_DATA_API_KEY"):

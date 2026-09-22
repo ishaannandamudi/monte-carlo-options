@@ -1,5 +1,21 @@
 # Monte Carlo Options
 
+## Primary workflow: American Options Analyzer
+
+The default application is now a simple real-market research workflow: enter a ticker, fetch its
+Massive underlying quote and option chain, and compare market midpoints with American CRR fair
+values. The result includes BSM-equivalent market IV, an independent leave-one-out smile
+volatility, Delta/Gamma/Theta/Vega/Rho, spread, volume, open interest, freshness, and exact quality
+warnings. Automatic expiration, rate, dividend, tree, and filtering assumptions remain visible.
+
+Start the backend and frontend as described below, open `http://127.0.0.1:5173`, enter a symbol such
+as `AAPL`, and choose **Analyze**. Massive credentials stay in the backend environment. Feed data
+may be live, delayed, or end-of-day according to the configured account, so the application always
+shows source, quote timestamp, and data age. It offers model comparison without trading
+recommendations. See [American Options Analyzer](docs/american-options-analyzer.md).
+
+The complete Phase 1–22 quantitative terminal remains intact under **Research** at `/research`.
+
 Monte Carlo Options is the quantitative foundation for a long-term derivatives-research platform.
 The current implementation prices European calls and puts under constant-market risk-neutral
 geometric Brownian motion (GBM), with a Black-Scholes-Merton benchmark, statistically sound
@@ -200,7 +216,7 @@ currency-safe decimal amounts.
 - Warmed repeated benchmarks with engine, tracking, and total runtime separated
 - Bounded recursive run/config/result comparison, metric history, and tolerance-based replay checks
 - Searchable and paginated experiment APIs with type, status, tag, date, signature, and metric sort
-- React/TypeScript research terminal with typed API connectivity, nine lazy workspaces, bounded
+- React/TypeScript application with a ticker-only analyzer and nine lazy research workspaces, bounded
   forms, charts, structured diagnostics, cancellation, exports, and experiment reproduction
 
 The current scope deliberately excludes general surface fitting/repair, double/multi-asset barriers

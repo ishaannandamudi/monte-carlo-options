@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 
 import { healthQueryOptions, versionQueryOptions } from '../api/system'
 import { listExperiments } from '../api/experiments'
-import { navigationItems } from '../app/navigation'
+import { researchNavigationItems } from '../app/navigation'
 import {
   Alert,
   Badge,
@@ -82,9 +82,7 @@ export default function OverviewPage() {
         title="Research areas"
       >
         <div className="quick-grid">
-          {navigationItems
-            .filter((item) => item.path !== '/')
-            .map((item) => (
+          {researchNavigationItems.map((item) => (
               <Link className="quick-link" key={item.path} to={item.path}>
                 <Card interactive>
                   <div className="quick-link__topline">
@@ -96,7 +94,7 @@ export default function OverviewPage() {
                   <span className="quick-link__action">Open area →</span>
                 </Card>
               </Link>
-            ))}
+          ))}
         </div>
       </Section>
 

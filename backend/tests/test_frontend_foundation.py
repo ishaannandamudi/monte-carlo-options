@@ -67,6 +67,7 @@ def test_cors_origins_load_from_comma_separated_environment(
 
 def test_phase22_frontend_routes_match_openapi_contract() -> None:
     required_methods = {
+        "/api/options/analyze": "post",
         "/api/pricing/black-scholes": "post",
         "/api/pricing/monte-carlo": "post",
         "/api/pricing/binomial": "post",

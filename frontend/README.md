@@ -1,7 +1,11 @@
-# Quantitative Research Frontend
+# American Options Analyzer and Quantitative Research Frontend
 
-The Phase 22 frontend turns the validated Phase 1–21 FastAPI services into a coherent local
-research terminal. The backend remains authoritative for contracts, validation, pricing,
+The default `/` route is a ticker-only American equity-options analyzer. Enter a symbol to fetch
+its backend-owned Massive quote, expirations, and bounded chain, then review market midpoint,
+American CRR fair value, BSM-equivalent IV, independent fair-value volatility, Greeks, liquidity,
+and quality diagnostics. The full Phase 22 terminal remains available under `/research`.
+
+The backend remains authoritative for contracts, validation, pricing,
 calibration, portfolio valuation, risk, numerical methods, resource limits, and experiment
 lineage. The browser manages forms, requests, comparisons, charts, formatting, and exports.
 
@@ -67,7 +71,11 @@ or other secrets in the browser configuration. FastAPI accepts a comma-separated
 
 ## Routes and workflows
 
-- **Overview**: backend health/version, frontend readiness, capabilities, recent experiments, and
+- **Analyze (`/`)**: ticker-only chain retrieval and American option analysis through
+  `POST /api/options/analyze`; expiration, calls/puts, sorting, contract details, warnings, and the
+  two-series volatility smile are available after one request. TanStack Query caches each complete
+  symbol/expiration/assumption request for two minutes and exposes manual refresh.
+- **Research (`/research`)**: backend health/version, frontend readiness, capabilities, recent experiments, and
   core-roadmap status.
 - **Pricing**: explicit European inputs for Black-Scholes-Merton, GBM Monte Carlo, CRR, Heston
   analytical/Monte Carlo, and Merton analytical/Monte Carlo; model-specific parameters appear only
@@ -87,6 +95,10 @@ or other secrets in the browser configuration. FastAPI accepts a comma-separated
 - **Experiments**: filterable/paginated runs, details, metadata, metrics, artifacts, JSON export,
   run comparison, reproduction, bounded sweeps, and benchmarks.
 
+Analyzer assumptions are collapsed under **Advanced assumptions**. They include target expiration
+days, rate/dividend overrides, tree steps, strike window, maximum contracts, quote-age threshold,
+and last-price fallback. Blank rate and dividend values use the visible backend configuration.
+
 Advanced workflows use validated JSON templates because the backend domain models are broad and
 research-oriented. Templates expose the meaningful method, target, weighting, optimizer, seed,
 sample, horizon, and diagnostic controls and remain fully editable. The focused Pricing and
@@ -104,7 +116,7 @@ src/
 │   ├── system/      # backend connectivity
 │   ├── ui/          # reusable controls and states
 │   └── visualization/ # accessible SVG line chart and heatmap
-├── pages/           # nine lazy-loaded production workspaces and tests
+├── pages/           # ticker analyzer plus nine lazy-loaded research workspaces and tests
 ├── styles/          # tokens, global, component and responsive layout rules
 ├── test/            # render and HTTP-mocking utilities
 └── utils/           # number formatting and safe browser export/copy

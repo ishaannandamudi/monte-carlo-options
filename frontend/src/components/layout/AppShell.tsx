@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { NavLink, Outlet } from 'react-router'
 
-import { navigationItems } from '../../app/navigation'
+import { navigationItems, researchNavigationItems } from '../../app/navigation'
 import { BackendStatusBanner } from '../system/BackendStatusBanner'
 import { LoadingState } from '../ui'
 
@@ -34,6 +34,19 @@ export function AppShell() {
               <span className="nav-link__available" aria-hidden="true">›</span>
             </NavLink>
           ))}
+          <details className="research-nav" open>
+            <summary>Research tools</summary>
+            {researchNavigationItems.map((item) => (
+              <NavLink
+                className={({ isActive }) => `nav-link nav-link--nested${isActive ? ' nav-link--active' : ''}`}
+                key={item.path}
+                to={item.path}
+              >
+                <span className="nav-link__code" aria-hidden="true">{item.code}</span>
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+          </details>
         </nav>
 
         <div className="sidebar__footer">
@@ -46,7 +59,7 @@ export function AppShell() {
         <header className="topbar">
           <div>
             <span className="topbar__context">Workspace</span>
-            <strong>Options Research Platform</strong>
+            <strong>American Options Research</strong>
           </div>
           <BackendStatusBanner />
         </header>

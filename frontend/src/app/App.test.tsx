@@ -35,14 +35,14 @@ describe('application shell', () => {
     mockSystemApi()
   })
 
-  it('renders persistent navigation and the overview dashboard', async () => {
+  it('renders persistent navigation and the analyzer landing page', async () => {
     renderApp()
 
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
     expect(
-      await screen.findByRole('heading', { name: 'Quantitative Derivatives Workbench' }),
+      await screen.findByRole('heading', { name: 'American Options Analyzer' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('Options Research Platform')).toBeInTheDocument()
+    expect(screen.getByText('American Options Research')).toBeInTheDocument()
   })
 
   it('navigates to a production Phase 22 route', async () => {
@@ -57,7 +57,7 @@ describe('application shell', () => {
   })
 
   it('shows successful health and version data', async () => {
-    renderApp()
+    renderApp('/research')
 
     expect(await screen.findByText('Connected')).toBeInTheDocument()
     expect(screen.getByText('0.22.0')).toBeInTheDocument()
@@ -68,10 +68,8 @@ describe('application shell', () => {
     mockSystemApi(503)
     renderApp()
 
-    expect(
-      await screen.findByText('Backend disconnected', { selector: '.error-panel strong' }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry connection' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Backend disconnected')
+    expect(screen.getByRole('heading', { name: 'American Options Analyzer' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
   })
 })

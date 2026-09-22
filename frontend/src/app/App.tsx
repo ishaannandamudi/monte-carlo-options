@@ -9,6 +9,7 @@ import {
 import { AppShell } from '../components/layout/AppShell'
 
 const OverviewPage = lazy(() => import('../pages/OverviewPage'))
+const AnalyzePage = lazy(() => import('../pages/AnalyzePage'))
 const PricingPage = lazy(() => import('../pages/PricingPage'))
 const VolatilityPage = lazy(() => import('../pages/VolatilityPage'))
 const ModelsPage = lazy(() => import('../pages/ModelsPage'))
@@ -24,7 +25,17 @@ const appRoutes: RouteObject[] = [
     path: '/',
     element: <AppShell />,
     children: [
-      { index: true, element: <OverviewPage /> },
+      { index: true, element: <AnalyzePage /> },
+      { path: 'research', element: <OverviewPage /> },
+      { path: 'research/pricing', element: <PricingPage /> },
+      { path: 'research/volatility', element: <VolatilityPage /> },
+      { path: 'research/models', element: <ModelsPage /> },
+      { path: 'research/portfolio', element: <PortfolioPage /> },
+      { path: 'research/risk', element: <RiskPage /> },
+      { path: 'research/regimes', element: <RegimesPage /> },
+      { path: 'research/qmc', element: <QmcPage /> },
+      { path: 'research/experiments', element: <ExperimentsPage /> },
+      // Preserve every Phase 22 deep link while presenting the grouped Research paths.
       { path: 'pricing', element: <PricingPage /> },
       { path: 'volatility', element: <VolatilityPage /> },
       { path: 'models', element: <ModelsPage /> },

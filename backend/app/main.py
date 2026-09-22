@@ -37,6 +37,7 @@ from backend.app.api.merton import analytics_router as merton_analytics_router
 from backend.app.api.merton import pricing_router as merton_pricing_router
 from backend.app.api.model_comparison import router as model_comparison_router
 from backend.app.api.options_analytics import router as options_analytics_router
+from backend.app.api.options_analyzer import router as options_analyzer_router
 from backend.app.api.portfolio import router as portfolio_router
 from backend.app.api.pricing import router as pricing_router
 from backend.app.api.qmc import analytics_router as qmc_analytics_router
@@ -93,6 +94,7 @@ app.include_router(volatility_router)
 app.include_router(volatility_analytics_router)
 app.include_router(market_data_router)
 app.include_router(options_analytics_router)
+app.include_router(options_analyzer_router)
 app.include_router(volatility_surface_router)
 app.include_router(binomial_pricing_router)
 app.include_router(binomial_analytics_router)

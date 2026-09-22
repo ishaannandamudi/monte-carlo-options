@@ -634,3 +634,339 @@ legend {
   color: var(--color-text-subtle);
   text-align: center;
 }
+
+.analyzer-hero {
+  display: grid;
+  gap: 0.8rem;
+  max-width: 68rem;
+  padding: clamp(1rem, 4vw, 3rem) 0 0;
+}
+
+.analyzer-hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 4.2rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.analyzer-hero > p {
+  max-width: 44rem;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.ticker-form {
+  display: grid;
+  grid-template-columns: minmax(15rem, 34rem) auto;
+  align-items: end;
+  gap: 0.65rem;
+  margin-top: 0.7rem;
+}
+
+.ticker-form .input,
+.ticker-form .button {
+  min-height: 3.15rem;
+  font-size: 1rem;
+}
+
+.ticker-examples {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-text-subtle);
+  font-size: 0.75rem;
+}
+
+.ticker-examples button,
+.table-sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent-strong);
+  cursor: pointer;
+  font: inherit;
+}
+
+.advanced-panel {
+  margin-top: 0.5rem;
+  padding: 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.advanced-panel summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.analysis-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.analysis-header h2,
+.analysis-header p {
+  margin: 0;
+}
+
+.analysis-header h2 {
+  font-size: 1.8rem;
+}
+
+.analysis-facts {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.analysis-facts > div,
+.analysis-facts > label {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  gap: 0.3rem;
+  padding: 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.analysis-facts span,
+.assumption-line {
+  color: var(--color-text-subtle);
+  font-size: 0.68rem;
+}
+
+.assumption-line {
+  grid-column: 1 / -1;
+}
+
+.chain-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+}
+
+.segmented-control {
+  display: flex;
+  padding: 0.2rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-sidebar);
+}
+
+.segmented-control button {
+  padding: 0.5rem 0.8rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.segmented-control button.is-active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+.chain-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.chain-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-table caption {
+  padding: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: left;
+  font-weight: 700;
+}
+
+.chain-table th,
+.chain-table td {
+  padding: 0.55rem 0.65rem;
+  border-top: 1px solid var(--color-border);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.chain-table th:nth-child(2),
+.chain-table td:nth-child(2) {
+  text-align: left;
+}
+
+.chain-table tbody tr:hover,
+.chain-table tbody tr.is-selected {
+  background: var(--color-surface-hover);
+}
+
+.gap-positive {
+  color: var(--color-success);
+}
+
+.gap-negative {
+  color: var(--color-danger);
+}
+
+.contract-detail {
+  display: grid;
+  gap: 1.2rem;
+  border-color: var(--color-border-strong);
+}
+
+.contract-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.contract-detail h2,
+.contract-detail h3 {
+  margin: 0;
+}
+
+.contract-detail code {
+  color: var(--color-text-subtle);
+  font-size: 0.7rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.detail-grid section {
+  padding: 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.detail-grid h3 {
+  margin-bottom: 0.7rem;
+  color: var(--color-accent-strong);
+  font-size: 0.78rem;
+}
+
+.detail-grid dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem 0.75rem;
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.detail-grid dt {
+  color: var(--color-text-subtle);
+}
+
+.detail-grid dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.flag-list,
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+
+.chart-legend__item {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+}
+
+.chart-legend__item::before {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.18rem;
+  margin-right: 0.35rem;
+  background: var(--color-accent);
+  content: '';
+  vertical-align: middle;
+}
+
+.chart-series-1 {
+  stroke: var(--color-blue);
+}
+
+.chart-legend__item.chart-series-1::before {
+  background: var(--color-blue);
+}
+
+.chart-point.chart-series-1 {
+  fill: var(--color-canvas);
+  stroke: var(--color-blue);
+}
+
+.chart-point--selected {
+  fill: var(--color-warning) !important;
+}
+
+@media (max-width: 1120px) {
+  .advanced-grid,
+  .analysis-facts,
+  .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 580px) {
+  .ticker-form,
+  .advanced-grid,
+  .analysis-facts,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ticker-form .button {
+    width: 100%;
+  }
+
+  .analysis-header,
+  .chain-toolbar,
+  .contract-detail__header {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+}
